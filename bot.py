@@ -8,7 +8,7 @@ from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
 
 import config
-from handlers import lot_handler, content_handler, metrics_handler
+from handlers import lot_handler, content_handler, metrics_handler, client_handler
 
 # Логирование
 logging.basicConfig(
@@ -31,11 +31,14 @@ async def cmd_start(message: types.Message):
     await message.answer(
         "🏢 **Glavnoe Bot**\n\n"
         "Я помогаю агентству создавать контент и рекламные пакеты для недвижимости.\n\n"
-        "**Команды:**\n"
+        "**Управление клиентами:**\n"
+        "/clients — список клиентов\n"
+        "/newclient — создать нового клиента\n\n"
+        "**Работа с контентом:**\n"
         "/lot — добавить новый лот\n"
         "/plan — создать контент-план\n"
-        "/metrics — обновить метрики\n"
-        "/help — помощь",
+        "/metrics — обновить метрики\n\n"
+        "/help — подробная справка",
         parse_mode="Markdown"
     )
 
@@ -74,6 +77,7 @@ REQUEST: AUTO
 
 
 # === Регистрация хендлеров ===
+client_handler.register_handlers(dp)
 lot_handler.register_handlers(dp)
 content_handler.register_handlers(dp)
 metrics_handler.register_handlers(dp)

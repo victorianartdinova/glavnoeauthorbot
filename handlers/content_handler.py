@@ -2,6 +2,7 @@
 Обработчик создания контента
 """
 from aiogram import types, Dispatcher
+from aiogram.filters import Command
 import json
 import os
 from datetime import datetime
@@ -28,4 +29,4 @@ async def cmd_plan(message: types.Message):
 
 def register_handlers(dp: Dispatcher):
     """Регистрация обработчиков"""
-    dp.register_message_handler(cmd_plan, commands=['plan'])
+    dp.message.register(cmd_plan, Command("plan"))

@@ -1,9 +1,10 @@
 """
 Обработчик добавления лотов
 """
-from aiogram import types, Dispatcher
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram import types, Dispatcher, F
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 import json
 import os
 from datetime import datetime
@@ -15,9 +16,9 @@ class LotStates(StatesGroup):
     waiting_for_lot_data = State()
 
 
-async def cmd_lot(message: types.Message):
+async def cmd_lot(message: types.Message, state: FSMContext):
     """Команда /lot - начало добавления лота"""
-    await LotStates.waiting_for_lot_data.set()
+    await state.set_state(LotStates.waiting_for_lot_data)
     await message.answer(
         "📦 **Добавление лота**\n\n"
         "Отправь данные в формате:\n"
@@ -66,7 +67,7 @@ async def process_lot_data(message: types.Message, state: FSMContext):
             response += "⚠️ Нет презентации — нужен сбор фактуры"
 
         await message.answer(response, parse_mode="Markdown")
-        await state.finish()
+        await state.clear()
 
     except Exception as e:
         await message.answer(f"❌ Ошибка парсинга: {str(e)}")
@@ -159,5 +160,5 @@ def check_ad_eligibility(lot_data: dict) -> bool:
 
 def register_handlers(dp: Dispatcher):
     """Регистрация обработчиков"""
-    dp.register_message_handler(cmd_lot, commands=['lot'], state='*')
-    dp.register_message_handler(process_lot_data, state=LotStates.waiting_for_lot_data)
+    dp.message.register(cmd_lot, Command("lot"))
+    dp.message.register(process_lot_data, LotStates.waiting_for_lot_data)

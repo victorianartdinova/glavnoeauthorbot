@@ -1,11 +1,11 @@
 """
 Glavnoe Bot - Telegram бот для агентства лидгена в недвижимости
 """
+import asyncio
 import logging
-from aiogram import Bot, Dispatcher, executor, types
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.fsm.storage.memory import MemoryStorage
 
 import config
 from handlers import lot_handler, content_handler, metrics_handler
@@ -20,12 +20,12 @@ logger = logging.getLogger(__name__)
 # Инициализация бота
 bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
 storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
+dp = Dispatcher(storage=storage)
 
 
 # === Команды ===
 
-@dp.message_handler(commands=['start'])
+@dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     """Приветствие"""
     await message.answer(
@@ -40,7 +40,7 @@ async def cmd_start(message: types.Message):
     )
 
 
-@dp.message_handler(commands=['help'])
+@dp.message(Command("help"))
 async def cmd_help(message: types.Message):
     """Справка"""
     help_text = """
@@ -80,6 +80,10 @@ metrics_handler.register_handlers(dp)
 
 
 # === Запуск ===
-if __name__ == '__main__':
+async def main():
     logger.info("🚀 Запуск Glavnoe Bot...")
-    executor.start_polling(dp, skip_updates=True)
+    await dp.start_polling(bot, skip_updates=True)
+
+
+if __name__ == '__main__':
+    asyncio.run(main())

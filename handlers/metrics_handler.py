@@ -2,6 +2,7 @@
 Обработчик обновления метрик
 """
 from aiogram import types, Dispatcher
+from aiogram.filters import Command
 
 
 async def cmd_metrics(message: types.Message):
@@ -21,4 +22,4 @@ async def cmd_metrics(message: types.Message):
 
 def register_handlers(dp: Dispatcher):
     """Регистрация обработчиков"""
-    dp.register_message_handler(cmd_metrics, commands=['metrics'])
+    dp.message.register(cmd_metrics, Command("metrics"))

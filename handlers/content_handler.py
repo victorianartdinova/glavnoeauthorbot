@@ -21,6 +21,7 @@ from utils.claude_api import generate_content
 from utils.jk_parser import find_url_in_text, parse_jk_website, format_parsed_data
 from utils.ad_eligibility import check_ad_eligibility, parse_lot_for_ads
 from utils.content_journal import add_entry as add_journal_entry
+from utils.meme_sources import get_top_references, format_reference_preview, get_reference_by_index
 
 
 def escape_markdown_v2(text: str) -> str:
@@ -1588,7 +1589,8 @@ async def cmd_post(message: types.Message, state: FSMContext):
         [InlineKeyboardButton(text="🏢 Лидген-карточка", callback_data="post_leadgen")],
         [InlineKeyboardButton(text="🎙 Пост с кружком", callback_data="post_circle")],
         [InlineKeyboardButton(text="📰 Дайджест", callback_data="post_digest")],
-        [InlineKeyboardButton(text="📚 Экспертный контент", callback_data="post_expert")]
+        [InlineKeyboardButton(text="📚 Экспертный контент", callback_data="post_expert")],
+        [InlineKeyboardButton(text="😂 Мем", callback_data="post_meme")]
     ])
 
     await message.answer(
@@ -1659,6 +1661,55 @@ async def callback_post_format(callback: CallbackQuery, state: FSMContext):
         )
         await state.set_state(ContentStates.waiting_for_post_lot)
 
+    elif format_type == "meme":
+        # Запускаем логику мемов
+        await show_meme_references(callback, state)
+        return
+
+    await callback.answer()
+
+
+def get_meme_references_keyboard(count: int) -> InlineKeyboardMarkup:
+    """Клавиатура выбора референса для мема"""
+    buttons = []
+    for i in range(1, count + 1):
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"✅ Выбрать #{i}",
+                callback_data=f"post_meme_select_{i}"
+            )
+        ])
+    buttons.append([
+        InlineKeyboardButton(text="🔄 Другие", callback_data="post_meme_refresh"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="post_meme_cancel")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+async def show_meme_references(callback: CallbackQuery, state: FSMContext):
+    """Показать референсы для мема"""
+    references = get_top_references(n=3, days=7)
+
+    if not references:
+        await callback.message.edit_text(
+            "😢 Нет подходящих референсов для мемов.\n\n"
+            "Парсер не собрал посты за последние 7 дней."
+        )
+        await callback.answer()
+        return
+
+    await state.update_data(meme_references=references)
+
+    preview_lines = ["😂 *Выбери референс для мема:*\n"]
+    for i, ref in enumerate(references, 1):
+        preview_lines.append(format_reference_preview(ref, i))
+        preview_lines.append("")
+
+    await callback.message.edit_text(
+        "\n".join(preview_lines),
+        parse_mode="Markdown",
+        reply_markup=get_meme_references_keyboard(len(references))
+    )
     await callback.answer()
 
 
@@ -1871,6 +1922,139 @@ async def process_post_digest(message: types.Message, state: FSMContext):
 
 
 # =============================================================================
+# МЕМ ИЗ МЕНЮ /post
+# =============================================================================
+
+async def callback_post_meme_select(callback: CallbackQuery, state: FSMContext):
+    """Выбор референса для мема из меню /post"""
+    data = await state.get_data()
+    client = data.get("client_slug") or data.get("current_client", "apple_real_estate")
+    references = data.get("meme_references", [])
+
+    index = int(callback.data.replace("post_meme_select_", ""))
+    reference = get_reference_by_index(references, index)
+
+    if not reference:
+        await callback.answer("Референс не найден")
+        return
+
+    await callback.answer("Генерирую мем...")
+
+    # Генерируем мем
+    from utils.client_context import load_client_context
+    client_context = load_client_context(client)
+
+    system_prompt = f"""Ты — креативный SMM-специалист агентства недвижимости.
+Адаптируй популярный мем под тематику недвижимости.
+
+КОНТЕКСТ: {get_client_prompt(client)}
+
+СТИЛЬ:
+- Ироничный, но не токсичный
+- Связь с болями ЦА (выбор, ипотека, ожидание/реальность)
+- Короткий текст (до 200 символов)
+- Без прямой рекламы"""
+
+    user_prompt = f"""РЕФЕРЕНС:
+{reference.get('text', '')}
+
+Источник: @{reference.get('channel', 'unknown')}
+
+---
+
+ФОРМАТ ОТВЕТА:
+
+МЕМНЫЙ ПОСТ
+[Текст поста — до 200 символов]
+
+---
+
+ТЗ ДИЗАЙНЕРУ
+
+ИДЕЯ: [концепция в 1-2 предложения]
+ТЕКСТ НА КАРТИНКЕ: [если нужен]
+ВИЗУАЛ: [что изобразить]
+РЕФЕРЕНС: https://t.me/{reference.get('channel', '')}/{reference.get('message_id', '')}"""
+
+    try:
+        meme_content = generate_content(system_prompt, user_prompt)
+
+        await state.update_data(generated_meme=meme_content, meme_reference=reference)
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="💾 Сохранить", callback_data="post_meme_save"),
+                InlineKeyboardButton(text="🔄 Другой", callback_data="post_meme_refresh"),
+            ],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="post_meme_cancel")]
+        ])
+
+        await callback.message.edit_text(
+            f"😂 *Мем готов!*\n\n{meme_content}",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        await callback.message.edit_text(f"Ошибка генерации: {str(e)}")
+
+
+async def callback_post_meme_save(callback: CallbackQuery, state: FSMContext):
+    """Сохранение мема в журнал"""
+    data = await state.get_data()
+    client = data.get("client_slug") or data.get("current_client", "apple_real_estate")
+    meme_content = data.get("generated_meme", "")
+
+    if not meme_content:
+        await callback.answer("Нет мема для сохранения")
+        return
+
+    add_journal_entry(
+        client_slug=client,
+        date=datetime.now().strftime("%Y-%m-%d"),
+        format_type="meme",
+        text=meme_content,
+        status="published",
+        source="bot_generated"
+    )
+
+    await callback.message.edit_text(
+        f"✅ *Мем сохранён в журнал!*\n\n{meme_content}",
+        parse_mode="Markdown"
+    )
+    await callback.answer("Сохранено!")
+
+
+async def callback_post_meme_refresh(callback: CallbackQuery, state: FSMContext):
+    """Обновить референсы"""
+    references = get_top_references(n=3, days=14)
+
+    if not references:
+        await callback.answer("Нет других референсов")
+        return
+
+    await state.update_data(meme_references=references)
+
+    preview_lines = ["😂 *Выбери референс для мема:*\n"]
+    for i, ref in enumerate(references, 1):
+        preview_lines.append(format_reference_preview(ref, i))
+        preview_lines.append("")
+
+    await callback.message.edit_text(
+        "\n".join(preview_lines),
+        parse_mode="Markdown",
+        reply_markup=get_meme_references_keyboard(len(references))
+    )
+    await callback.answer()
+
+
+async def callback_post_meme_cancel(callback: CallbackQuery, state: FSMContext):
+    """Отмена мема"""
+    await callback.message.edit_text("Отменено")
+    await callback.answer()
+
+
+# =============================================================================
 # КОМАНДА /circle — ТЗ ДЛЯ ЗАПИСИ КРУГОВ
 # =============================================================================
 
@@ -1982,6 +2166,12 @@ def register_handlers(dp: Dispatcher):
     dp.message.register(cmd_add_channel, Command("add_channel"))
     dp.message.register(cmd_post, Command("post"))
     dp.message.register(cmd_circle, Command("circle"))
+
+    # Callback обработчики для мемов из /post (регистрируем ДО общего post_)
+    dp.callback_query.register(callback_post_meme_select, F.data.startswith("post_meme_select_"))
+    dp.callback_query.register(callback_post_meme_save, F.data == "post_meme_save")
+    dp.callback_query.register(callback_post_meme_refresh, F.data == "post_meme_refresh")
+    dp.callback_query.register(callback_post_meme_cancel, F.data == "post_meme_cancel")
 
     # Callback обработчики для inline-кнопок
     dp.callback_query.register(callback_post_format, F.data.startswith("post_"))

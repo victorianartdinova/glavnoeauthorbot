@@ -12,6 +12,22 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8499202304:AAF2FULsVpXGapb
 # Claude API (берётся из окружения Claude Code на сервере)
 CLAUDE_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
+# Рабочий чат команды
+TEAM_CHAT_ID = -1002367799345
+
+# Ветки (threads) по клиентам
+CLIENT_THREADS = {
+    "apple_real_estate": 13130,
+    "artem_solodkov": 21173,
+    "nadejda_dmitruk": 17408,
+}
+
+# Оператор (публикует посты)
+OPERATOR_USERNAME = "ksandrbloger"
+
+# TG Booster API (токены хранятся в файлах клиентов)
+# Каждый клиент имеет свой токен в docs/CLIENTS/{client}/tg_booster.json
+
 # Пути
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOCS_DIR = os.path.join(BASE_DIR, "docs")

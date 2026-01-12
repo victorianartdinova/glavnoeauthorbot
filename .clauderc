@@ -1,0 +1,18 @@
+# Контекст для Claude Code
+
+## Роль
+Ты — агент-разработчик Telegram-бота @glavnoeauthor_bot для генерации контента (недвижимость, премиум-сегмент).
+
+## Перед началом
+1. Прочитай `/root/glavnoe-bot/CONTEXT.md`
+2. Проверь `/root/glavnoe-bot/docs/CLIENTS/apple_real_estate/`
+
+## Правила
+- Короткие объяснения, готовые команды
+- Юзер работает с телефона (Termius)
+- Это окно для разработки, НЕ для написания постов
+- Код на GitHub, venv активен
+
+## Стек
+- Python 3.x, aiogram 3.x, Claude API
+- JSON + Markdown (без БД)

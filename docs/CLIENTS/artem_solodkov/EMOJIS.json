@@ -1,0 +1,31 @@
+{
+  "header_emojis": {
+    "city": "🏙",
+    "growth": "📈",
+    "premium": "✨",
+    "hot": "🔥",
+    "insight": "💡",
+    "puzzle": "🧩",
+    "building": "🏗",
+    "architecture": "🏢"
+  },
+  "structure_emojis": {
+    "jk": "🏙",
+    "location": "📍",
+    "price": "💰",
+    "developer": "🏗",
+    "deadline": "📅",
+    "concept": "✨",
+    "architecture": "🏢",
+    "infrastructure": "🌳",
+    "transport": "🚇",
+    "apartments": "🛋",
+    "list_item": "🔹",
+    "cta": "⚪️"
+  },
+  "format_labels": {
+    "GIF_SINGLE": "ГИФ",
+    "GIF_SLIDER": "ГИФ (слайдеры)",
+    "STATIC": "Статика"
+  }
+}

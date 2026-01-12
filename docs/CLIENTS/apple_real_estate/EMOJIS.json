@@ -1,0 +1,26 @@
+{
+  "header_emojis": {
+    "apartment": "🏢",
+    "family": "🏡",
+    "hot": "🔥",
+    "intrigue": "👀",
+    "water": "🌊",
+    "park": "🌳",
+    "city": "🏙",
+    "premium": "✨"
+  },
+  "structure_emojis": {
+    "location": "📍",
+    "finance": "💰",
+    "feature": "▪️",
+    "cta": "⚪️",
+    "date": "📅",
+    "format": "🎬",
+    "type": "📢"
+  },
+  "format_labels": {
+    "GIF_SINGLE": "ГИФ",
+    "GIF_SLIDER": "ГИФ (слайдеры)",
+    "STATIC": "Статика"
+  }
+}

@@ -25,6 +25,9 @@ CLIENT_THREADS = {
 # Оператор (публикует посты)
 OPERATOR_USERNAME = "ksandrbloger"
 
+# Админ (для /dev команды)
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0")) or None
+
 # TG Booster API (токены хранятся в файлах клиентов)
 # Каждый клиент имеет свой токен в docs/CLIENTS/{client}/tg_booster.json
 

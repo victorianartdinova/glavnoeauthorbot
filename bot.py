@@ -18,7 +18,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 import config
-from handlers import lot_handler, content_handler, metrics_handler, client_handler, plan_handler, journal_handler, meme_handler
+from handlers import lot_handler, content_handler, metrics_handler, client_handler, plan_handler, journal_handler, meme_handler, focus_handler, voice_handler, dev_handler
 
 
 def get_clients_keyboard() -> ReplyKeyboardMarkup:
@@ -176,8 +176,9 @@ async def btn_post(message: types.Message, state: FSMContext):
 async def btn_brief(message: types.Message, state: FSMContext):
     client = await check_client_selected(message, state)
     if client:
+        client_safe = client.replace("_", "\\_")
         await message.answer(
-            f"🎨 *ТЗ для дизайнера* ({client})\n\n"
+            f"🎨 *ТЗ для дизайнера* ({client_safe})\n\n"
             "Отправь данные по шаблону:\n\n"
             "🔗 *Ссылка:* https://jk-example.ru\n"
             "💰 *Цена:* от 25 млн\n"
@@ -245,6 +246,9 @@ content_handler.register_handlers(dp)
 plan_handler.register_handlers(dp)
 journal_handler.register_handlers(dp)
 meme_handler.register_handlers(dp)
+focus_handler.register_handlers(dp)
+voice_handler.register_handlers(dp)
+dev_handler.register_handlers(dp)
 metrics_handler.register_handlers(dp)
 
 

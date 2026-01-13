@@ -10,8 +10,11 @@ from datetime import datetime, timedelta
 
 from utils.content_journal import (
     add_entry, load_journal, format_journal_calendar,
-    get_week_start, get_entries_by_date, FORMAT_MAP
+    get_week_start, get_entries_by_date, get_entries_by_week,
+    clear_day, clear_week, fill_week_from_plan, get_week_stats,
+    FORMAT_MAP
 )
+from utils.history_index import find_similar_entries, get_stats, build_history_index
 
 
 class JournalStates(StatesGroup):
@@ -23,6 +26,8 @@ class JournalStates(StatesGroup):
     waiting_for_manual_topic = State()
     waiting_for_manual_date = State()
     waiting_for_custom_date = State()  # Ввод даты вручную
+    # Управление журналом
+    waiting_for_edit_day_formats = State()  # Ввод форматов для дня
 
 
 def get_format_keyboard() -> InlineKeyboardMarkup:
@@ -69,6 +74,7 @@ def get_week_nav_keyboard(week_start: datetime) -> InlineKeyboardMarkup:
     """Клавиатура навигации по неделям"""
     prev_week = week_start - timedelta(days=7)
     next_week = week_start + timedelta(days=7)
+    week_str = week_start.strftime('%Y-%m-%d')
 
     buttons = [
         [
@@ -91,6 +97,37 @@ def get_week_nav_keyboard(week_start: datetime) -> InlineKeyboardMarkup:
             InlineKeyboardButton(
                 text="➕ Добавить пост",
                 callback_data="journal_add_manual"
+            ),
+        ],
+        # Кнопки управления
+        [
+            InlineKeyboardButton(
+                text="✏️ Изменить день",
+                callback_data=f"journal_edit_day_{week_str}"
+            ),
+            InlineKeyboardButton(
+                text="🗑 Очистить день",
+                callback_data=f"journal_clear_day_{week_str}"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="🧹 Очистить неделю",
+                callback_data=f"journal_clear_week_{week_str}"
+            ),
+            InlineKeyboardButton(
+                text="📥 Заполнить из плана",
+                callback_data=f"journal_fill_week_{week_str}"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="🔍 Похожие за 30 дней",
+                callback_data="journal_similar"
+            ),
+            InlineKeyboardButton(
+                text="📊 Статистика",
+                callback_data="journal_stats"
             ),
         ]
     ]
@@ -397,6 +434,162 @@ async def process_custom_date(message: types.Message, state: FSMContext):
         )
 
 
+async def callback_journal_similar(callback: CallbackQuery, state: FSMContext):
+    """Показать похожие записи за 30 дней с примерами постов"""
+    data = await state.get_data()
+    client = data.get("current_client")
+
+    if not client:
+        await callback.answer("Сначала выбери клиента")
+        return
+
+    await callback.answer("Анализирую...")
+
+    # Сначала пересобираем индекс
+    build_history_index(client, period_days=30)
+
+    # Получаем статистику
+    stats = get_stats(client)
+
+    if not stats or not stats.get("hooks"):
+        await callback.message.answer(
+            "📭 Нет данных для анализа.\n"
+            "Добавь несколько постов в журнал."
+        )
+        return
+
+    # Загружаем журнал для примеров
+    journal = load_journal(client)
+    journal_by_id = {e.get("id"): e for e in journal}
+
+    # Формируем отчёт о повторах
+    lines = ["🔍 *Анализ контента за 30 дней*\n"]
+
+    # Хуки с примерами
+    hooks = stats.get("hooks", {})
+    if hooks:
+        hooks_map = {
+            "financial": "💰 Финансовый",
+            "location": "📍 Локация",
+            "premium": "👑 Премиум",
+            "urgency": "⏰ Срочность",
+            "emotional": "❤️ Эмоции",
+            "unknown": "❓ Прочее"
+        }
+        lines.append("*Хуки:*")
+        for hook, count in sorted(hooks.items(), key=lambda x: -x[1]):
+            name = hooks_map.get(hook, hook)
+            warning = " ⚠️" if count >= 3 else ""
+            lines.append(f"  {name}: {count}{warning}")
+
+            # Добавляем примеры (до 2 постов)
+            examples = _get_examples_by_hook(journal, hook, limit=2)
+            for ex in examples:
+                text_preview = ex[:40].replace("\n", " ") + "..."
+                lines.append(f"    ↳ _{text_preview}_")
+        lines.append("")
+
+    # CTA с примерами
+    ctas = stats.get("ctas", {})
+    if ctas:
+        lines.append("*CTA (слова):*")
+        for cta, count in sorted(ctas.items(), key=lambda x: -x[1])[:5]:
+            warning = " ⚠️" if count >= 2 else ""
+            lines.append(f"  «{cta}»: {count}{warning}")
+        lines.append("")
+
+    # Углы с примерами
+    angles = stats.get("angles", {})
+    if angles:
+        lines.append("*Углы подачи:*")
+        for angle, count in sorted(angles.items(), key=lambda x: -x[1])[:5]:
+            if angle == "unknown":
+                continue  # Пропускаем unknown в отчёте
+            warning = " ⚠️" if count >= 2 else ""
+            lines.append(f"  {angle}: {count}{warning}")
+        lines.append("")
+
+    # Форматы
+    formats = stats.get("formats", {})
+    if formats:
+        lines.append("*Форматы:*")
+        for fmt, count in sorted(formats.items(), key=lambda x: -x[1]):
+            lines.append(f"  {fmt}: {count}")
+
+    lines.append("\n⚠️ = использовано часто, избегай повторов")
+
+    await callback.message.answer(
+        "\n".join(lines),
+        parse_mode="Markdown"
+    )
+
+
+def _get_examples_by_hook(journal: list, hook_type: str, limit: int = 2) -> list:
+    """Получить примеры постов по типу хука"""
+    from utils.history_index import extract_hook_type
+
+    examples = []
+    for entry in reversed(journal):  # Сначала свежие
+        text = entry.get("text", "")
+        if text and extract_hook_type(text) == hook_type:
+            examples.append(text)
+            if len(examples) >= limit:
+                break
+    return examples
+
+
+async def callback_journal_stats(callback: CallbackQuery, state: FSMContext):
+    """Показать общую статистику журнала"""
+    data = await state.get_data()
+    client = data.get("current_client")
+
+    if not client:
+        await callback.answer("Сначала выбери клиента")
+        return
+
+    await callback.answer()
+
+    journal = load_journal(client)
+
+    if not journal:
+        await callback.message.answer("📭 Журнал пуст")
+        return
+
+    # Считаем статистику
+    total = len(journal)
+    published = len([e for e in journal if e.get("status") == "published"])
+    planned = len([e for e in journal if e.get("status") == "planned"])
+
+    # По форматам
+    formats_count = {}
+    for entry in journal:
+        fmt = entry.get("format", "unknown")
+        formats_count[fmt] = formats_count.get(fmt, 0) + 1
+
+    # Последние 7 дней
+    week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+    last_week = [e for e in journal if e.get("date", "") >= week_ago]
+
+    lines = [
+        f"📊 *Статистика журнала: {client}*\n",
+        f"📝 Всего записей: {total}",
+        f"✅ Опубликовано: {published}",
+        f"📋 В плане: {planned}",
+        f"📅 За 7 дней: {len(last_week)}",
+        "",
+        "*По форматам:*"
+    ]
+
+    for fmt, count in sorted(formats_count.items(), key=lambda x: -x[1]):
+        fmt_name = FORMAT_MAP.get(fmt, fmt)
+        lines.append(f"  {fmt_name}: {count}")
+
+    await callback.message.answer(
+        "\n".join(lines),
+        parse_mode="Markdown"
+    )
+
+
 async def save_manual_entry(message: types.Message, state: FSMContext, pub_date: str):
     """Сохранение записи в журнал"""
     data = await state.get_data()
@@ -425,6 +618,293 @@ async def save_manual_entry(message: types.Message, state: FSMContext, pub_date:
     )
 
     await state.set_state(None)
+
+
+# =============================================================================
+# УПРАВЛЕНИЕ ЖУРНАЛОМ: Изменить/Очистить день, Очистить/Заполнить неделю
+# =============================================================================
+
+def get_days_keyboard(week_start: datetime, action: str) -> InlineKeyboardMarkup:
+    """Клавиатура выбора дня недели для действия"""
+    weekdays_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+    buttons = []
+    row = []
+
+    for i in range(7):
+        day = week_start + timedelta(days=i)
+        date_str = day.strftime("%Y-%m-%d")
+        label = f"{weekdays_ru[i]} {day.strftime('%d.%m')}"
+
+        row.append(InlineKeyboardButton(
+            text=label,
+            callback_data=f"journal_{action}_select_{date_str}"
+        ))
+
+        if len(row) == 4 or i == 6:
+            buttons.append(row)
+            row = []
+
+    buttons.append([
+        InlineKeyboardButton(text="↩️ Назад", callback_data=f"journal_week_{week_start.strftime('%Y-%m-%d')}")
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+async def callback_edit_day(callback: CallbackQuery, state: FSMContext):
+    """Начало редактирования дня — показать выбор дня"""
+    week_str = callback.data.replace("journal_edit_day_", "")
+    week_start = datetime.strptime(week_str, "%Y-%m-%d")
+
+    await state.update_data(journal_week_start=week_str)
+
+    await callback.message.edit_text(
+        "✏️ *Изменить день*\n\n"
+        "Выбери день для редактирования:",
+        parse_mode="Markdown",
+        reply_markup=get_days_keyboard(week_start, "edit")
+    )
+    await callback.answer()
+
+
+async def callback_edit_select_day(callback: CallbackQuery, state: FSMContext):
+    """Выбран день для редактирования — показать текущие записи"""
+    date_str = callback.data.replace("journal_edit_select_", "")
+    data = await state.get_data()
+    client = data.get("current_client")
+    week_str = data.get("journal_week_start", "")
+
+    if not client:
+        await callback.answer("Сначала выбери клиента")
+        return
+
+    await state.update_data(edit_day_date=date_str)
+
+    # Получаем текущие записи
+    entries = get_entries_by_date(client, date_str)
+
+    date_display = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m")
+    if entries:
+        formats_list = ", ".join([e.get("format", "unknown").upper() for e in entries])
+        current_text = f"Текущие: {formats_list}"
+    else:
+        current_text = "Пусто"
+
+    await callback.message.edit_text(
+        f"✏️ *Редактирование {date_display}*\n\n"
+        f"{current_text}\n\n"
+        "Введи новые форматы через запятую:\n"
+        "`лидген, кейс, эксперт`\n\n"
+        "Или напиши `очистить` чтобы удалить все записи дня.",
+        parse_mode="Markdown"
+    )
+    await state.set_state(JournalStates.waiting_for_edit_day_formats)
+    await callback.answer()
+
+
+async def process_edit_day_formats(message: types.Message, state: FSMContext):
+    """Обработка ввода форматов для дня"""
+    data = await state.get_data()
+    client = data.get("current_client")
+    date_str = data.get("edit_day_date", "")
+    week_str = data.get("journal_week_start", "")
+
+    if not client or not date_str:
+        await message.answer("❌ Ошибка: потеряны данные. Попробуй снова /journal")
+        await state.set_state(None)
+        return
+
+    text = message.text.strip().lower()
+
+    # Очистка дня
+    if text in ["очистить", "clear", "удалить"]:
+        deleted = clear_day(client, date_str)
+        date_display = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m")
+        await message.answer(f"🗑 Удалено записей за {date_display}: {deleted}")
+    else:
+        # Парсим форматы
+        format_aliases = {
+            "лидген": "lidgen", "lidgen": "lidgen", "лид": "lidgen",
+            "кейс": "case", "case": "case",
+            "мем": "meme", "meme": "meme",
+            "эксперт": "expert", "expert": "expert",
+            "дайджест": "digest", "digest": "digest",
+            "лайв": "live", "live": "live",
+            "кружок": "circle", "circle": "circle",
+            "подкаст": "podcast", "podcast": "podcast",
+        }
+
+        formats = [f.strip() for f in text.split(",") if f.strip()]
+        valid_formats = []
+        for f in formats:
+            normalized = format_aliases.get(f.lower())
+            if normalized:
+                valid_formats.append(normalized)
+
+        if not valid_formats:
+            await message.answer(
+                "❌ Не распознаны форматы.\n"
+                "Доступные: лидген, кейс, мем, эксперт, дайджест, лайв, кружок, подкаст"
+            )
+            return
+
+        # Очищаем день и добавляем новые записи
+        clear_day(client, date_str)
+
+        for fmt in valid_formats:
+            add_entry(
+                client_slug=client,
+                date=date_str,
+                format_type=fmt,
+                text=f"[{fmt.upper()}]",
+                status="planned",
+                source="manual"
+            )
+
+        date_display = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m")
+        formats_display = ", ".join([FORMAT_MAP.get(f, f) for f in valid_formats])
+        await message.answer(f"✅ Обновлено {date_display}: {formats_display}")
+
+    # Возвращаемся к журналу
+    await state.set_state(None)
+
+    if week_str:
+        week_start = datetime.strptime(week_str, "%Y-%m-%d")
+        calendar_text = format_journal_calendar(client, week_start)
+        await message.answer(
+            calendar_text,
+            parse_mode="Markdown",
+            reply_markup=get_week_nav_keyboard(week_start)
+        )
+
+
+async def callback_clear_day(callback: CallbackQuery, state: FSMContext):
+    """Начало очистки дня — показать выбор дня"""
+    week_str = callback.data.replace("journal_clear_day_", "")
+    week_start = datetime.strptime(week_str, "%Y-%m-%d")
+
+    await state.update_data(journal_week_start=week_str)
+
+    await callback.message.edit_text(
+        "🗑 *Очистить день*\n\n"
+        "Выбери день для очистки:",
+        parse_mode="Markdown",
+        reply_markup=get_days_keyboard(week_start, "clearday")
+    )
+    await callback.answer()
+
+
+async def callback_clear_day_select(callback: CallbackQuery, state: FSMContext):
+    """Выбран день для очистки — удаляем записи"""
+    date_str = callback.data.replace("journal_clearday_select_", "")
+    data = await state.get_data()
+    client = data.get("current_client")
+    week_str = data.get("journal_week_start", "")
+
+    if not client:
+        await callback.answer("Сначала выбери клиента")
+        return
+
+    deleted = clear_day(client, date_str)
+    date_display = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m")
+
+    await callback.answer(f"Удалено: {deleted}")
+
+    # Обновляем календарь
+    if week_str:
+        week_start = datetime.strptime(week_str, "%Y-%m-%d")
+    else:
+        week_start = get_week_start()
+
+    calendar_text = format_journal_calendar(client, week_start)
+    await callback.message.edit_text(
+        calendar_text,
+        parse_mode="Markdown",
+        reply_markup=get_week_nav_keyboard(week_start)
+    )
+
+
+async def callback_clear_week(callback: CallbackQuery, state: FSMContext):
+    """Очистка недели — запрос подтверждения"""
+    week_str = callback.data.replace("journal_clear_week_", "")
+    week_start = datetime.strptime(week_str, "%Y-%m-%d")
+
+    await state.update_data(journal_week_start=week_str)
+
+    week_display = f"{week_start.strftime('%d.%m')} — {(week_start + timedelta(days=6)).strftime('%d.%m')}"
+
+    await callback.message.edit_text(
+        f"🧹 *Очистить неделю {week_display}?*\n\n"
+        "Все записи будут удалены!",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Да, очистить", callback_data=f"journal_clear_week_confirm_{week_str}"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data=f"journal_week_{week_str}"),
+            ]
+        ])
+    )
+    await callback.answer()
+
+
+async def callback_clear_week_confirm(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение очистки недели"""
+    week_str = callback.data.replace("journal_clear_week_confirm_", "")
+    week_start = datetime.strptime(week_str, "%Y-%m-%d")
+
+    data = await state.get_data()
+    client = data.get("current_client")
+
+    if not client:
+        await callback.answer("Сначала выбери клиента")
+        return
+
+    deleted = clear_week(client, week_start)
+    await callback.answer(f"Удалено: {deleted}")
+
+    calendar_text = format_journal_calendar(client, week_start)
+    await callback.message.edit_text(
+        calendar_text,
+        parse_mode="Markdown",
+        reply_markup=get_week_nav_keyboard(week_start)
+    )
+
+
+async def callback_fill_week(callback: CallbackQuery, state: FSMContext):
+    """Заполнить неделю из контент-плана"""
+    week_str = callback.data.replace("journal_fill_week_", "")
+    week_start = datetime.strptime(week_str, "%Y-%m-%d")
+
+    data = await state.get_data()
+    client = data.get("current_client")
+
+    if not client:
+        await callback.answer("Сначала выбери клиента")
+        return
+
+    added = fill_week_from_plan(client, week_start)
+
+    if added == -1:
+        await callback.answer("Нет контент-плана для этого клиента")
+        await callback.message.answer(
+            "📭 *Нет контент-плана*\n\n"
+            "Сначала создай план командой /plan",
+            parse_mode="Markdown"
+        )
+        return
+
+    if added == 0:
+        await callback.answer("Нет постов в плане на эту неделю")
+        return
+
+    await callback.answer(f"Добавлено: {added}")
+
+    calendar_text = format_journal_calendar(client, week_start)
+    await callback.message.edit_text(
+        calendar_text,
+        parse_mode="Markdown",
+        reply_markup=get_week_nav_keyboard(week_start)
+    )
 
 
 def register_handlers(dp: Dispatcher):
@@ -457,6 +937,16 @@ def register_handlers(dp: Dispatcher):
         F.data == "journal_cancel"
     )
 
+    # Анализ и статистика
+    dp.callback_query.register(
+        callback_journal_similar,
+        F.data == "journal_similar"
+    )
+    dp.callback_query.register(
+        callback_journal_stats,
+        F.data == "journal_stats"
+    )
+
     # Ручное добавление поста
     dp.callback_query.register(
         callback_journal_add_manual,
@@ -479,4 +969,38 @@ def register_handlers(dp: Dispatcher):
     dp.message.register(
         process_custom_date,
         JournalStates.waiting_for_custom_date
+    )
+
+    # Управление журналом
+    dp.callback_query.register(
+        callback_edit_day,
+        F.data.startswith("journal_edit_day_")
+    )
+    dp.callback_query.register(
+        callback_edit_select_day,
+        F.data.startswith("journal_edit_select_")
+    )
+    dp.callback_query.register(
+        callback_clear_day,
+        F.data.startswith("journal_clear_day_")
+    )
+    dp.callback_query.register(
+        callback_clear_day_select,
+        F.data.startswith("journal_clearday_select_")
+    )
+    dp.callback_query.register(
+        callback_clear_week_confirm,
+        F.data.startswith("journal_clear_week_confirm_")
+    )
+    dp.callback_query.register(
+        callback_clear_week,
+        F.data.startswith("journal_clear_week_")
+    )
+    dp.callback_query.register(
+        callback_fill_week,
+        F.data.startswith("journal_fill_week_")
+    )
+    dp.message.register(
+        process_edit_day_formats,
+        JournalStates.waiting_for_edit_day_formats
     )

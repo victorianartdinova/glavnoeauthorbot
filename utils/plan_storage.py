@@ -1,22 +1,16 @@
 """
 Хранение и управление контент-планами
+Теперь использует SQLite вместо JSON
 """
-import json
-import os
-import uuid
+import re
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict
 
-import config
+from utils.database import db_connection, PlansStore
 
 
 # Форматы, которые защищены от удаления и требуют валидации темы
 PROTECTED_FORMATS = ["ЛИДГЕН", "LIDGEN"]
-
-
-def generate_post_id() -> str:
-    """Генерирует уникальный ID поста"""
-    return f"post_{uuid.uuid4().hex[:8]}"
 
 
 def is_protected_format(format_type: str) -> bool:
@@ -24,144 +18,128 @@ def is_protected_format(format_type: str) -> bool:
     return format_type.upper() in PROTECTED_FORMATS
 
 
-def get_plans_dir() -> str:
-    """Путь к директории планов"""
-    return os.path.join(config.BASE_DIR, "data", "plans")
-
-
-def get_client_plan_dir(client_slug: str) -> str:
-    """Путь к директории планов клиента"""
-    return os.path.join(get_plans_dir(), client_slug)
-
-
-def ensure_plan_dirs(client_slug: str):
-    """Создать директории если не существуют"""
-    client_dir = get_client_plan_dir(client_slug)
-    os.makedirs(client_dir, exist_ok=True)
-
-
-def save_plan(client_slug: str, days: list, period: int = 7) -> str:
+def save_plan(client_slug: str, days: list, period: int = 7) -> int:
     """
     Сохранить контент-план.
 
     Args:
         client_slug: slug клиента
-        days: список дней [{day, date, format, topic, status}, ...]
+        days: список дней [{day, date, weekday, format, topic, is_ads, status, raw_content}, ...]
         period: период плана в днях
 
     Returns:
-        plan_id (дата создания)
+        plan_id
     """
-    ensure_plan_dirs(client_slug)
+    with db_connection() as conn:
+        store = PlansStore(conn)
 
-    plan_id = datetime.now().strftime("%Y-%m-%d")
+        # Создаём план
+        plan_id = store.create(client_slug, period)
 
-    plan_data = {
-        "client": client_slug,
-        "created": plan_id,
-        "period": period,
-        "days": days
-    }
+        # Добавляем дни и посты
+        for day_data in days:
+            day_id = store.add_day(
+                plan_id=plan_id,
+                day_num=day_data.get("day", 1),
+                date=day_data.get("date", ""),
+                weekday=day_data.get("weekday", "")
+            )
 
-    plan_path = os.path.join(get_client_plan_dir(client_slug), f"{plan_id}.json")
-
-    with open(plan_path, "w", encoding="utf-8") as f:
-        json.dump(plan_data, f, ensure_ascii=False, indent=2)
+            # Если старый формат (без posts)
+            if "posts" not in day_data:
+                format_type = day_data.get("format", "ПОСТ")
+                store.add_post_to_day(
+                    plan_day_id=day_id,
+                    format=format_type,
+                    topic=day_data.get("topic", ""),
+                    is_ads=day_data.get("is_ads", False),
+                    protected=is_protected_format(format_type),
+                    raw_content=day_data.get("raw_content", "")
+                )
+            else:
+                # Новый формат с массивом posts
+                for post in day_data.get("posts", []):
+                    store.add_post_to_day(
+                        plan_day_id=day_id,
+                        format=post.get("format", "ПОСТ"),
+                        topic=post.get("topic", ""),
+                        is_ads=post.get("is_ads", False),
+                        protected=post.get("protected", False),
+                        raw_content=post.get("raw_content", "")
+                    )
 
     return plan_id
 
 
-def migrate_day_to_posts(day: dict) -> dict:
-    """
-    Миграция старого формата дня (один пост) в новый (массив постов).
-
-    Старый: {day, date, format, topic, status}
-    Новый: {day, date, posts: [{id, format, topic, protected, status}]}
-    """
-    if "posts" in day:
-        return day  # Уже новый формат
-
-    format_type = day.get("format", "ПОСТ")
-
-    new_day = {
-        "day": day["day"],
-        "date": day["date"],
-        "weekday": day.get("weekday", ""),
-        "posts": [{
-            "id": generate_post_id(),
-            "format": format_type,
-            "topic": day.get("topic", ""),
-            "protected": is_protected_format(format_type),
-            "is_ads": day.get("is_ads", False),
-            "status": day.get("status", "pending")
-        }]
-    }
-
-    # Сохраняем сырой контент если есть
-    if day.get("raw_content"):
-        new_day["posts"][0]["raw_content"] = day["raw_content"]
-
-    return new_day
-
-
-def load_plan(client_slug: str, plan_id: Optional[str] = None) -> Optional[dict]:
+def load_plan(client_slug: str, plan_id: Optional[int] = None) -> Optional[dict]:
     """
     Загрузить контент-план.
 
     Args:
         client_slug: slug клиента
-        plan_id: ID плана (дата). Если None — последний план
+        plan_id: ID плана. Если None — последний план
 
     Returns:
         dict с планом или None
     """
-    client_dir = get_client_plan_dir(client_slug)
+    with db_connection() as conn:
+        store = PlansStore(conn)
 
-    if not os.path.exists(client_dir):
-        return None
+        if plan_id:
+            plan = store.get(plan_id)
+        else:
+            plan = store.get_latest(client_slug)
 
-    if plan_id:
-        plan_path = os.path.join(client_dir, f"{plan_id}.json")
-    else:
-        # Берём последний план
-        plans = sorted([f for f in os.listdir(client_dir) if f.endswith(".json")], reverse=True)
-        if not plans:
+        if not plan:
             return None
-        plan_path = os.path.join(client_dir, plans[0])
 
-    if not os.path.exists(plan_path):
-        return None
-
-    with open(plan_path, "r", encoding="utf-8") as f:
-        plan = json.load(f)
-
-    # Миграция старых планов
-    migrated = False
-    for i, day in enumerate(plan.get("days", [])):
-        if "posts" not in day:
-            plan["days"][i] = migrate_day_to_posts(day)
-            migrated = True
-
-    # Сохраняем мигрированный план
-    if migrated:
-        with open(plan_path, "w", encoding="utf-8") as f:
-            json.dump(plan, f, ensure_ascii=False, indent=2)
-
-    return plan
+        # Конвертируем в старый формат для совместимости
+        return _plan_to_legacy_format(plan)
 
 
-def update_plan_day(client_slug: str, plan_id: str, day_index: int, updates: dict) -> bool:
+def _plan_to_legacy_format(plan: Dict) -> Dict:
+    """Конвертировать план из БД в старый формат"""
+    legacy = {
+        "client": plan.get("client_id", ""),
+        "created": plan.get("created_at", ""),
+        "period": plan.get("period", 7),
+        "plan_id": plan.get("id"),  # Добавляем для удобства
+        "days": []
+    }
+
+    for day in plan.get("days", []):
+        legacy_day = {
+            "day": day.get("day_num", 1),
+            "date": day.get("date", ""),
+            "weekday": day.get("weekday", ""),
+            "day_id": day.get("id"),  # ID дня в БД
+            "posts": []
+        }
+
+        for post in day.get("posts", []):
+            legacy_post = {
+                "id": f"post_{post['id']}",
+                "db_id": post["id"],  # ID в БД для обновлений
+                "format": post.get("format", "ПОСТ"),
+                "topic": post.get("topic", ""),
+                "protected": bool(post.get("protected", 0)),
+                "is_ads": bool(post.get("is_ads", 0)),
+                "status": post.get("status", "pending"),
+                "raw_content": post.get("raw_content", "")
+            }
+            if post.get("post_id"):
+                legacy_post["linked_post_id"] = post["post_id"]
+            legacy_day["posts"].append(legacy_post)
+
+        legacy["days"].append(legacy_day)
+
+    return legacy
+
+
+def update_plan_day(client_slug: str, plan_id: int, day_index: int, updates: dict) -> bool:
     """
-    Обновить день в плане.
-
-    Args:
-        client_slug: slug клиента
-        plan_id: ID плана
-        day_index: индекс дня (0-based)
-        updates: dict с обновлениями {topic: "...", status: "..."}
-
-    Returns:
-        True если успешно
+    Обновить день в плане (устаревший метод, для совместимости).
+    Лучше использовать update_post напрямую.
     """
     plan = load_plan(client_slug, plan_id)
     if not plan:
@@ -170,13 +148,137 @@ def update_plan_day(client_slug: str, plan_id: str, day_index: int, updates: dic
     if day_index < 0 or day_index >= len(plan["days"]):
         return False
 
-    plan["days"][day_index].update(updates)
+    # Обновляем первый пост дня
+    day = plan["days"][day_index]
+    if day["posts"]:
+        post = day["posts"][0]
+        return update_post(client_slug, plan_id, day["day"], post["db_id"], updates)
 
-    plan_path = os.path.join(get_client_plan_dir(client_slug), f"{plan_id}.json")
-    with open(plan_path, "w", encoding="utf-8") as f:
-        json.dump(plan, f, ensure_ascii=False, indent=2)
+    return False
 
-    return True
+
+def get_day_display(day: dict) -> str:
+    """Форматирует день для отображения"""
+    first_post = day["posts"][0] if day.get("posts") else {}
+    ads_mark = " 📢" if first_post.get("is_ads") else ""
+    return f"День {day['day']} ({day['date']}, {day['weekday']}): {first_post.get('format', 'ПОСТ')}{ads_mark}\n{first_post.get('topic', '')}"
+
+
+def get_post_by_id(plan: dict, day_num: int, post_id: str) -> Optional[dict]:
+    """Получить пост по ID (строковому)"""
+    for day in plan.get("days", []):
+        if day["day"] == day_num:
+            for post in day.get("posts", []):
+                if post["id"] == post_id:
+                    return post
+    return None
+
+
+def update_post(client_slug: str, plan_id: int, day_num: int, post_db_id: int, updates: dict) -> bool:
+    """
+    Обновить конкретный пост в дне.
+
+    Args:
+        client_slug: slug клиента
+        plan_id: ID плана
+        day_num: номер дня (1-based)
+        post_db_id: ID поста в БД (plan_posts.id)
+        updates: dict с обновлениями
+
+    Returns:
+        True если успешно
+    """
+    with db_connection() as conn:
+        store = PlansStore(conn)
+        return store.update_plan_post(post_db_id, **updates)
+
+
+def add_post_to_day(client_slug: str, plan_id: int, day_num: int, format_type: str, topic: str, is_ads: bool = False) -> Optional[int]:
+    """
+    Добавить новый пост к дню.
+
+    Args:
+        client_slug: slug клиента
+        plan_id: ID плана
+        day_num: номер дня (1-based)
+        format_type: формат поста
+        topic: тема поста
+        is_ads: для рекламы или нет
+
+    Returns:
+        ID нового поста или None
+    """
+    plan = load_plan(client_slug, plan_id)
+    if not plan:
+        return None
+
+    # Находим day_id
+    for day in plan["days"]:
+        if day["day"] == day_num:
+            day_id = day.get("day_id")
+            if not day_id:
+                return None
+
+            with db_connection() as conn:
+                store = PlansStore(conn)
+                return store.add_post_to_day(
+                    plan_day_id=day_id,
+                    format=format_type,
+                    topic=topic,
+                    is_ads=is_ads,
+                    protected=is_protected_format(format_type)
+                )
+
+    return None
+
+
+def delete_post_from_day(client_slug: str, plan_id: int, day_num: int, post_db_id: int) -> bool:
+    """
+    Удалить пост из дня (только незащищённые).
+    """
+    plan = load_plan(client_slug, plan_id)
+    if not plan:
+        return False
+
+    for day in plan["days"]:
+        if day["day"] == day_num:
+            for post in day.get("posts", []):
+                if post["db_id"] == post_db_id:
+                    if post.get("protected"):
+                        return False  # Нельзя удалять защищённые
+
+                    with db_connection() as conn:
+                        conn.execute("DELETE FROM plan_posts WHERE id = ?", (post_db_id,))
+                        conn.commit()
+                    return True
+    return False
+
+
+def delete_plan(client_slug: str, plan_id: Optional[int] = None) -> bool:
+    """
+    Удалить контент-план.
+    """
+    if plan_id is None:
+        plan = load_plan(client_slug)
+        if not plan:
+            return False
+        plan_id = plan.get("plan_id")
+
+    if not plan_id:
+        return False
+
+    with db_connection() as conn:
+        store = PlansStore(conn)
+        return store.delete(plan_id)
+
+
+def list_plans(client_slug: str) -> List[Dict]:
+    """
+    Получить список планов клиента (от новых к старым).
+    """
+    with db_connection() as conn:
+        store = PlansStore(conn)
+        return store.list_plans(client_slug)
 
 
 def parse_plan_from_text(plan_text: str, period: int = 7) -> list:
@@ -190,8 +292,6 @@ def parse_plan_from_text(plan_text: str, period: int = 7) -> list:
     Returns:
         список дней [{day, date, format, topic, status}, ...]
     """
-    import re
-
     days = []
 
     # Паттерн для поиска дней: "📆 13.01 (Пн)" или "📆 13.01.2026 (Пн)"
@@ -200,8 +300,6 @@ def parse_plan_from_text(plan_text: str, period: int = 7) -> list:
     # Разбиваем текст по дням
     parts = re.split(day_pattern, plan_text)
 
-    # parts: [до первого дня, дата1, день_недели1, контент1, дата2, день_недели2, контент2, ...]
-
     day_num = 1
     for i in range(1, len(parts) - 2, 3):
         date_str = parts[i].strip()
@@ -209,20 +307,16 @@ def parse_plan_from_text(plan_text: str, period: int = 7) -> list:
         content = parts[i + 2].strip() if i + 2 < len(parts) else ""
 
         # Извлекаем формат и тему из контента
-        # Паттерн: "🏢 ЛИДГЕН: тема" или "🎙 КРУЖОК: тема"
         format_match = re.search(r'([🏢🎙📚📰📸🔥💡✨])\s*([А-ЯA-Z]+)[:\s]+(.+?)(?:\n|📢|📱|$)', content)
 
         if format_match:
-            emoji = format_match.group(1)
             format_type = format_match.group(2).strip()
             topic = format_match.group(3).strip()
         else:
-            # Берём первую строку как тему
             first_line = content.split('\n')[0] if content else ""
             format_type = "ПОСТ"
             topic = first_line[:100]
 
-        # Проверяем, для рекламы или канала
         is_ads = "📢" in content or "ADS" in content.upper()
 
         days.append({
@@ -233,7 +327,7 @@ def parse_plan_from_text(plan_text: str, period: int = 7) -> list:
             "topic": topic,
             "is_ads": is_ads,
             "status": "pending",
-            "raw_content": content[:500]  # Сохраняем сырой контент для контекста
+            "raw_content": content[:500]
         })
 
         day_num += 1
@@ -259,128 +353,53 @@ def parse_plan_from_text(plan_text: str, period: int = 7) -> list:
     return days
 
 
-def get_day_display(day: dict) -> str:
-    """Форматирует день для отображения (совместимость со старым форматом)"""
-    # Новый формат с posts
-    if "posts" in day:
-        first_post = day["posts"][0] if day["posts"] else {}
-        ads_mark = " 📢" if first_post.get("is_ads") else ""
-        return f"День {day['day']} ({day['date']}, {day['weekday']}): {first_post.get('format', 'ПОСТ')}{ads_mark}\n{first_post.get('topic', '')}"
+# ============
+# Функция миграции JSON -> SQLite
+# ============
 
-    # Старый формат
-    ads_mark = " 📢" if day.get("is_ads") else ""
-    return f"День {day['day']} ({day['date']}, {day['weekday']}): {day['format']}{ads_mark}\n{day['topic']}"
-
-
-def get_post_by_id(plan: dict, day_num: int, post_id: str) -> Optional[dict]:
-    """Получить пост по ID"""
-    for day in plan.get("days", []):
-        if day["day"] == day_num:
-            for post in day.get("posts", []):
-                if post["id"] == post_id:
-                    return post
-    return None
-
-
-def update_post(client_slug: str, plan_id: str, day_num: int, post_id: str, updates: dict) -> bool:
+def migrate_plans_to_sqlite():
     """
-    Обновить конкретный пост в дне.
-
-    Args:
-        client_slug: slug клиента
-        plan_id: ID плана
-        day_num: номер дня (1-based)
-        post_id: ID поста
-        updates: dict с обновлениями
-
-    Returns:
-        True если успешно
+    Миграция планов из старых JSON файлов в SQLite.
     """
-    plan = load_plan(client_slug, plan_id)
-    if not plan:
-        return False
+    import json
+    import os
+    import config
 
-    for day in plan["days"]:
-        if day["day"] == day_num:
-            for post in day.get("posts", []):
-                if post["id"] == post_id:
-                    post.update(updates)
-                    plan_path = os.path.join(get_client_plan_dir(client_slug), f"{plan_id}.json")
-                    with open(plan_path, "w", encoding="utf-8") as f:
-                        json.dump(plan, f, ensure_ascii=False, indent=2)
-                    return True
-    return False
+    json_dir = os.path.join(config.BASE_DIR, "data", "plans")
 
+    if not os.path.exists(json_dir):
+        print("Нет планов для миграции")
+        return
 
-def add_post_to_day(client_slug: str, plan_id: str, day_num: int, format_type: str, topic: str, is_ads: bool = False) -> Optional[str]:
-    """
-    Добавить новый пост к дню.
+    migrated = 0
+    for client_slug in os.listdir(json_dir):
+        client_dir = os.path.join(json_dir, client_slug)
+        if not os.path.isdir(client_dir):
+            continue
 
-    Args:
-        client_slug: slug клиента
-        plan_id: ID плана
-        day_num: номер дня (1-based)
-        format_type: формат поста (ПРОГРЕВ, ЖИВОЙ, МЕМ)
-        topic: тема поста
-        is_ads: для рекламы или нет
+        for plan_file in os.listdir(client_dir):
+            if not plan_file.endswith(".json"):
+                continue
 
-    Returns:
-        ID нового поста или None
-    """
-    plan = load_plan(client_slug, plan_id)
-    if not plan:
-        return None
+            plan_path = os.path.join(client_dir, plan_file)
+            print(f"Мигрирую {client_slug}/{plan_file}...")
 
-    for day in plan["days"]:
-        if day["day"] == day_num:
-            new_post = {
-                "id": generate_post_id(),
-                "format": format_type,
-                "topic": topic,
-                "protected": is_protected_format(format_type),
-                "is_ads": is_ads,
-                "status": "pending"
-            }
-            day["posts"].append(new_post)
+            with open(plan_path, "r", encoding="utf-8") as f:
+                plan_data = json.load(f)
 
-            plan_path = os.path.join(get_client_plan_dir(client_slug), f"{plan_id}.json")
-            with open(plan_path, "w", encoding="utf-8") as f:
-                json.dump(plan, f, ensure_ascii=False, indent=2)
+            # Сохраняем план в SQLite
+            save_plan(
+                client_slug=client_slug,
+                days=plan_data.get("days", []),
+                period=plan_data.get("period", 7)
+            )
 
-            return new_post["id"]
-    return None
+            # Переименовываем
+            backup_path = plan_path + ".migrated"
+            os.rename(plan_path, backup_path)
+            migrated += 1
+
+    print(f"\nМигрировано планов: {migrated}")
 
 
-def delete_post_from_day(client_slug: str, plan_id: str, day_num: int, post_id: str) -> bool:
-    """
-    Удалить пост из дня (только незащищённые).
-
-    Args:
-        client_slug: slug клиента
-        plan_id: ID плана
-        day_num: номер дня (1-based)
-        post_id: ID поста
-
-    Returns:
-        True если успешно, False если пост защищён или не найден
-    """
-    plan = load_plan(client_slug, plan_id)
-    if not plan:
-        return False
-
-    for day in plan["days"]:
-        if day["day"] == day_num:
-            for i, post in enumerate(day.get("posts", [])):
-                if post["id"] == post_id:
-                    # Проверяем защиту
-                    if post.get("protected"):
-                        return False  # Нельзя удалять защищённые посты
-
-                    day["posts"].pop(i)
-
-                    plan_path = os.path.join(get_client_plan_dir(client_slug), f"{plan_id}.json")
-                    with open(plan_path, "w", encoding="utf-8") as f:
-                        json.dump(plan, f, ensure_ascii=False, indent=2)
-
-                    return True
-    return False
+# Для запуска: python -c "from utils.plan_storage import migrate_plans_to_sqlite; migrate_plans_to_sqlite()"

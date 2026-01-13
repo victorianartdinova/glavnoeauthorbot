@@ -114,6 +114,32 @@ def init_db():
 
             CREATE INDEX IF NOT EXISTS idx_plan_posts_day
             ON plan_posts (plan_day_id);
+
+            -- Dev Backlog (задачи разработки)
+            CREATE TABLE IF NOT EXISTS dev_backlog (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                type TEXT NOT NULL DEFAULT 'feature',   -- bug|feature|debt
+                priority TEXT NOT NULL DEFAULT 'P2',    -- P0|P1|P2|P3
+                status TEXT NOT NULL DEFAULT 'todo',    -- todo|in_progress|done|blocked
+                source TEXT DEFAULT 'user',             -- user|auto
+                notes TEXT,
+                related_files TEXT,                     -- JSON array
+                acceptance_criteria TEXT,
+                last_seen_context TEXT,
+                title_hash TEXT,                        -- для дедупликации
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_dev_backlog_status
+            ON dev_backlog (status);
+
+            CREATE INDEX IF NOT EXISTS idx_dev_backlog_priority
+            ON dev_backlog (priority);
+
+            CREATE INDEX IF NOT EXISTS idx_dev_backlog_hash
+            ON dev_backlog (title_hash);
         """)
         conn.commit()
 

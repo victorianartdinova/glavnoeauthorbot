@@ -32,6 +32,10 @@ from utils.prompt_variations import (
     get_random_expert_opener, get_random_style_instruction,
     detect_investment_lot
 )
+from utils.client_style import (
+    get_style_prompt_section, validate_post, fix_post_issues,
+    get_post_length_requirements
+)
 
 
 def escape_markdown_v2(text: str) -> str:
@@ -84,10 +88,11 @@ def get_post_edit_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🌸 Мягче", callback_data="post_softer")
         ],
         [
-            InlineKeyboardButton(text="📋 Скопировать", callback_data="post_copy"),
-            InlineKeyboardButton(text="🎨 ТЗ дизайнеру", callback_data="post_brief")
+            InlineKeyboardButton(text="🎨 ТЗ дизайнеру", callback_data="post_brief"),
+            InlineKeyboardButton(text="🎙️ Сценарий", callback_data="post_to_script")
         ],
         [
+            InlineKeyboardButton(text="📋 Скопировать", callback_data="post_copy"),
             InlineKeyboardButton(text="✅ Готово", callback_data="post_done")
         ]
     ])
@@ -1690,6 +1695,9 @@ async def cmd_post(message: types.Message, state: FSMContext):
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏢 Лидген-карточка", callback_data="post_leadgen")],
+        [InlineKeyboardButton(text="📦 Лидген + карточки", callback_data="post_leadgen_cards")],
+        [InlineKeyboardButton(text="🎠 Лидген-карусель (5-8)", callback_data="post_leadgen_carousel")],
+        [InlineKeyboardButton(text="🔀 A/B баннер (2 варианта)", callback_data="post_leadgen_ab")],
         [InlineKeyboardButton(text="🎙 Пост с кружком", callback_data="post_circle")],
         [InlineKeyboardButton(text="📰 Дайджест", callback_data="post_digest")],
         [InlineKeyboardButton(text="📚 Экспертный контент", callback_data="post_expert")],
@@ -1715,6 +1723,13 @@ async def callback_post_format(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
+    # Лидген + карточки — переход в отдельный handler
+    if format_type == "leadgen_cards":
+        from handlers.leadgen_cards_handler import cmd_leadgen_cards
+        await cmd_leadgen_cards(callback.message, state)
+        await callback.answer()
+        return
+
     # Мемы — без выбора даты
     if format_type == "meme":
         await show_meme_references(callback, state)
@@ -1723,6 +1738,8 @@ async def callback_post_format(callback: CallbackQuery, state: FSMContext):
     # Для всех остальных форматов — сначала спрашиваем дату
     format_names = {
         "leadgen": "🏢 Лидген-карточка",
+        "leadgen_carousel": "🎠 Лидген-карусель (5-8 карточек)",
+        "leadgen_ab": "🔀 A/B баннер (2 варианта)",
         "circle": "🎙 Пост с кружком",
         "digest": "📰 Дайджест",
         "expert": "📚 Экспертный контент"
@@ -1853,6 +1870,29 @@ async def show_post_input_step(message_or_callback, state: FSMContext, edit: boo
             "Пример: \"5 ошибок при покупке первой квартиры\""
         )
         await state.set_state(ContentStates.waiting_for_post_lot)
+
+    elif post_format == "leadgen_carousel":
+        text = (
+            f"🎠 Лидген-карусель на {date_display}\n\n"
+            "Отправь данные объекта для карусели из 5-8 карточек:\n"
+            "• Локация, цена, платёж\n"
+            "• Преимущества (3-5 пунктов)\n"
+            "• Инфраструктура\n"
+            "• Условия покупки\n\n"
+            "Можно отправить ссылку на сайт ЖК."
+        )
+        await state.set_state(ContentStates.waiting_for_post_lot)
+
+    elif post_format == "leadgen_ab":
+        text = (
+            f"🔀 A/B баннер на {date_display}\n\n"
+            "Отправь данные объекта для 2 вариантов баннера:\n"
+            "• Вариант A — рациональный (цифры, выгода)\n"
+            "• Вариант B — эмоциональный (образы, lifestyle)\n\n"
+            "Отправь ссылку на ЖК или описание."
+        )
+        await state.set_state(ContentStates.waiting_for_post_lot)
+
     else:
         text = f"Пост на {date_display}\n\nОтправь данные для генерации."
         await state.set_state(ContentStates.waiting_for_post_lot)
@@ -1994,6 +2034,10 @@ async def process_post_lot(message: types.Message, state: FSMContext):
 - Конкретные цифры
 - CTA с тематическим ключевым словом"""
 
+            # Получаем требования к стилю клиента
+            style_section = get_style_prompt_section(client_slug)
+            length_req = get_post_length_requirements(client_slug)
+
             system_prompt = f"""{context}
 
 Ты пишешь {lot_type}.
@@ -2009,7 +2053,9 @@ async def process_post_lot(message: types.Message, state: FSMContext):
 
 {rules}
 - КАЖДЫЙ пост должен быть УНИКАЛЬНЫМ — другая структура, другие формулировки
-- НЕ копируй примеры из ToV дословно — бери только стиль и тон"""
+- НЕ копируй примеры из ToV дословно — бери только стиль и тон
+
+{style_section}"""
 
             user_prompt = f"""Напиши лидген-карточку на основе данных:
 
@@ -2020,6 +2066,7 @@ async def process_post_lot(message: types.Message, state: FSMContext):
 - ДАННЫЕ ОТ ПОЛЬЗОВАТЕЛЯ имеют ВЫСШИЙ ПРИОРИТЕТ — это точная информация.
 - Название ЖК и застройщика — служебная информация. В посте их указывать ЗАПРЕЩЕНО.
 - Используй общие формулировки: "Жилой комплекс", "Проект", "Комплекс у парка".
+- Пост должен быть НЕ КОРОЧЕ {length_req.get('min_words', 80)} слов.
 
 Сделай пост готовым к публикации в Telegram."""
 
@@ -2082,6 +2129,98 @@ async def process_post_lot(message: types.Message, state: FSMContext):
 
 Сделай пост готовым к публикации."""
 
+        elif post_format == "leadgen_carousel":
+            # Лидген-карусель 5-8 карточек
+            style_section = get_style_prompt_section(client_slug)
+
+            system_prompt = f"""{context}
+
+Ты создаёшь ЛИДГЕН-КАРУСЕЛЬ из 5-8 карточек для Telegram.
+
+СТРУКТУРА КАРУСЕЛИ:
+1. КАРТОЧКА-ХУК: Проблема/вопрос ЦА (зацепить внимание)
+2. КАРТОЧКА-ПРОБЛЕМА: Усиление боли (почему это важно)
+3. КАРТОЧКА-РЕШЕНИЕ: Как этот объект решает проблему
+4. КАРТОЧКА-КЕЙС: Цифры/факты/социальное доказательство
+5. КАРТОЧКА-ОФФЕР: Условия покупки (цена, платёж, взнос)
+6. КАРТОЧКА-CTA: Призыв к действию
+
+ФОРМАТ ОТВЕТА:
+Для каждой карточки укажи:
+📌 КАРТОЧКА N — [НАЗВАНИЕ]
+[ТЕКСТ НА КАРТОЧКЕ]: короткий, 1-3 строки
+[ВИЗУАЛ]: что показать на фоне
+---
+
+ТЕКСТ ПОСТА (подводка к карусели):
+[3-5 строк — интрига, зачем листать]
+
+ПРАВИЛА:
+- НЕ используй markdown
+- ЗАПРЕЩЕНО название ЖК и застройщика
+- Каждая карточка — самодостаточная мысль
+- Стрелки → между карточками подразумеваются
+
+{style_section}"""
+
+            user_prompt = f"""Создай лидген-карусель на основе данных:
+
+{user_input}
+
+Сделай 6-8 карточек + текст поста."""
+
+        elif post_format == "leadgen_ab":
+            # A/B баннер — 2 варианта
+            style_section = get_style_prompt_section(client_slug)
+
+            system_prompt = f"""{context}
+
+Ты создаёшь A/B БАННЕР — 2 варианта одного оффера для тестирования.
+
+ВАРИАНТ A — РАЦИОНАЛЬНЫЙ:
+- Акцент на цифрах: цена, платёж, экономия
+- Логические аргументы
+- Факты и сравнения
+
+ВАРИАНТ B — ЭМОЦИОНАЛЬНЫЙ:
+- Акцент на образах: lifestyle, статус, комфорт
+- Эмоциональные триггеры
+- Истории и сценарии
+
+ФОРМАТ ОТВЕТА:
+
+🔵 ВАРИАНТ A: РАЦИОНАЛЬНЫЙ
+[ПЛАШКА 1]: ...
+[ПЛАШКА 2]: ...
+[ЗАГОЛОВОК]: ...
+💡 Идея: почему это сработает
+
+═══════════════════════════════════════
+
+🟠 ВАРИАНТ B: ЭМОЦИОНАЛЬНЫЙ
+[ПЛАШКА 1]: ...
+[ПЛАШКА 2]: ...
+[ЗАГОЛОВОК]: ...
+💡 Идея: почему это сработает
+
+═══════════════════════════════════════
+
+ТЕКСТ ПОСТА (общий):
+[Пост для обоих баннеров]
+
+ПРАВИЛА:
+- НЕ используй markdown
+- ЗАПРЕЩЕНО название ЖК
+- Варианты должны быть ПРИНЦИПИАЛЬНО разными по подходу
+
+{style_section}"""
+
+            user_prompt = f"""Создай A/B баннер на основе данных:
+
+{user_input}
+
+Сделай 2 контрастных варианта + текст поста."""
+
         else:
             # Дайджест обрабатывается отдельно
             await state.clear()
@@ -2090,11 +2229,21 @@ async def process_post_lot(message: types.Message, state: FSMContext):
         # Генерация через Claude С ПАМЯТЬЮ
         post = generate_content_with_memory(client_slug, system_prompt, user_prompt)
 
+        # Валидация и автоисправление поста
+        post = fix_post_issues(post, client_slug)
+        validation = validate_post(post, client_slug)
+
         # Извлекаем метаданные из поста
         metadata = extract_metadata_from_post(post)
 
         # Сохраняем в журнал с метаданными
-        format_map = {"leadgen": "lidgen", "circle": "circle", "expert": "expert"}
+        format_map = {
+            "leadgen": "lidgen",
+            "leadgen_carousel": "lidgen_carousel",
+            "leadgen_ab": "lidgen_ab",
+            "circle": "circle",
+            "expert": "expert"
+        }
         journal_format = format_map.get(post_format, post_format)
         # Используем выбранную дату или сегодня
         post_date = data.get("post_date") or datetime.now().strftime("%Y-%m-%d")
@@ -2117,18 +2266,26 @@ async def process_post_lot(message: types.Message, state: FSMContext):
             post_user_prompt=user_prompt
         )
 
+        # Формируем статус валидации
+        validation_status = ""
+        if not validation["valid"]:
+            issues_text = "\n".join([f"⚠️ {i}" for i in validation["issues"]])
+            validation_status = f"\n\n---\n{issues_text}"
+
+        word_info = f"📊 {validation['word_count']} слов"
+
         # Отправляем результат с кнопками
         max_length = 3500  # Меньше, чтобы влезли кнопки
         if len(post) > max_length:
             parts = [post[i:i+max_length] for i in range(0, len(post), max_length)]
             for i, part in enumerate(parts):
                 if i == len(parts) - 1:
-                    await message.answer(part, reply_markup=get_post_edit_keyboard())
+                    await message.answer(f"{part}\n\n{word_info}{validation_status}", reply_markup=get_post_edit_keyboard())
                 else:
                     await message.answer(part)
         else:
             await message.answer(
-                f"✅ Пост готов:\n\n{post}",
+                f"✅ Пост готов:\n\n{post}\n\n{word_info}{validation_status}",
                 reply_markup=get_post_edit_keyboard()
             )
 
@@ -2619,15 +2776,24 @@ async def callback_post_copy(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Пост не найден")
 
 
-def get_post_brief_keyboard() -> InlineKeyboardMarkup:
+def get_post_brief_keyboard(is_compact: bool = True) -> InlineKeyboardMarkup:
     """Клавиатура согласования ТЗ из поста"""
-    return InlineKeyboardMarkup(inline_keyboard=[
+    buttons = [
         [
             InlineKeyboardButton(text="✅ Согласовать", callback_data="post_brief_approve"),
             InlineKeyboardButton(text="✏️ Редактировать", callback_data="post_brief_edit")
-        ],
-        [InlineKeyboardButton(text="⬅️ Назад к посту", callback_data="post_brief_back")]
-    ])
+        ]
+    ]
+
+    # Кнопка развернуть/свернуть
+    if is_compact:
+        buttons.append([InlineKeyboardButton(text="📖 Развернуть ТЗ", callback_data="post_brief_expand")])
+    else:
+        buttons.append([InlineKeyboardButton(text="📝 Короткое ТЗ", callback_data="post_brief_compact")])
+
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад к посту", callback_data="post_brief_back")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def get_brief_format_keyboard() -> InlineKeyboardMarkup:
@@ -2636,6 +2802,7 @@ def get_brief_format_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🖼 Баннер (1 картинка)", callback_data="brief_format_banner")],
         [InlineKeyboardButton(text="🎬 ГИФ-слайдер (2-3 слайда)", callback_data="brief_format_slider")],
         [InlineKeyboardButton(text="📑 Галерея (4-5 карточек)", callback_data="brief_format_gallery")],
+        [InlineKeyboardButton(text="🎠 Карусель (5-8 карточек)", callback_data="brief_format_carousel")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="brief_format_back")]
     ])
 
@@ -2896,7 +3063,9 @@ def get_brief_prompts(format_type: str, emoji_section: str) -> tuple[str, str]:
 
 
 async def callback_brief_format(callback: CallbackQuery, state: FSMContext):
-    """Генерация ТЗ в выбранном формате"""
+    """Генерация ТЗ в выбранном формате — по умолчанию КОМПАКТНОЕ"""
+    from utils.design_brief import generate_compact_brief, generate_detailed_brief
+
     format_type = callback.data.replace("brief_format_", "")
 
     if format_type == "back":
@@ -2918,26 +3087,34 @@ async def callback_brief_format(callback: CallbackQuery, state: FSMContext):
     format_names = {
         "banner": "баннер",
         "slider": "ГИФ-слайдер",
-        "gallery": "галерею"
+        "gallery": "галерею",
+        "carousel": "карусель"
     }
 
-    await callback.message.edit_text(f"⏳ Генерирую ТЗ на {format_names.get(format_type, 'креатив')}...")
+    await callback.message.edit_text(f"⏳ Генерирую КОРОТКОЕ ТЗ на {format_names.get(format_type, 'креатив')}...")
     await callback.answer()
 
     try:
         emoji_section = get_emoji_prompt_section(client_slug)
-        system_prompt, user_prompt_template = get_brief_prompts(format_type, emoji_section)
-        user_prompt = user_prompt_template.format(post=post)
 
-        brief = generate_content(system_prompt, user_prompt)
+        # Генерируем КОМПАКТНОЕ ТЗ по умолчанию
+        brief = generate_compact_brief(post, format_type, emoji_section)
 
-        # Сохраняем ТЗ в state
-        await state.update_data(post_brief=brief)
+        # Сохраняем ТЗ и формат в state
+        await state.update_data(
+            post_brief=brief,
+            brief_format=format_type,
+            brief_is_compact=True
+        )
+
+        # Подсчитываем символы
+        char_count = len(brief)
+        status = "✅" if char_count <= 1200 else "⚠️"
 
         preview = brief[:3500] + "..." if len(brief) > 3500 else brief
         await callback.message.answer(
-            f"🎨 ТЗ из поста:\n\n{preview}",
-            reply_markup=get_post_brief_keyboard()
+            f"🎨 Короткое ТЗ ({char_count} симв.) {status}\n\n{preview}",
+            reply_markup=get_post_brief_keyboard(is_compact=True)
         )
 
     except Exception as e:
@@ -2946,6 +3123,71 @@ async def callback_brief_format(callback: CallbackQuery, state: FSMContext):
             "Вернуться к посту:",
             reply_markup=get_post_edit_keyboard()
         )
+
+
+async def callback_post_brief_expand(callback: CallbackQuery, state: FSMContext):
+    """Развернуть ТЗ — сгенерировать подробную версию"""
+    from utils.design_brief import generate_detailed_brief
+
+    data = await state.get_data()
+    post = data.get("generated_post", "")
+    client_slug = data.get("current_client")
+    format_type = data.get("brief_format", "banner")
+
+    await callback.answer("Генерирую подробное ТЗ...")
+    await callback.message.edit_text("⏳ Генерирую ПОДРОБНОЕ ТЗ...")
+
+    try:
+        emoji_section = get_emoji_prompt_section(client_slug)
+        detailed_brief = generate_detailed_brief(post, format_type, emoji_section)
+
+        await state.update_data(
+            post_brief=detailed_brief,
+            brief_is_compact=False
+        )
+
+        char_count = len(detailed_brief)
+        preview = detailed_brief[:3500] + "..." if len(detailed_brief) > 3500 else detailed_brief
+        await callback.message.answer(
+            f"📖 Подробное ТЗ ({char_count} симв.)\n\n{preview}",
+            reply_markup=get_post_brief_keyboard(is_compact=False)
+        )
+
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка: {e}")
+
+
+async def callback_post_brief_compact(callback: CallbackQuery, state: FSMContext):
+    """Свернуть ТЗ — сгенерировать короткую версию"""
+    from utils.design_brief import generate_compact_brief
+
+    data = await state.get_data()
+    post = data.get("generated_post", "")
+    client_slug = data.get("current_client")
+    format_type = data.get("brief_format", "banner")
+
+    await callback.answer("Генерирую короткое ТЗ...")
+    await callback.message.edit_text("⏳ Генерирую КОРОТКОЕ ТЗ...")
+
+    try:
+        emoji_section = get_emoji_prompt_section(client_slug)
+        compact_brief = generate_compact_brief(post, format_type, emoji_section)
+
+        await state.update_data(
+            post_brief=compact_brief,
+            brief_is_compact=True
+        )
+
+        char_count = len(compact_brief)
+        status = "✅" if char_count <= 1200 else "⚠️"
+        preview = compact_brief[:3500] + "..." if len(compact_brief) > 3500 else compact_brief
+        await callback.message.answer(
+            f"📝 Короткое ТЗ ({char_count} симв.) {status}\n\n{preview}",
+            reply_markup=get_post_brief_keyboard(is_compact=True)
+        )
+
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка: {e}")
 
 
 async def callback_post_brief_approve(callback: CallbackQuery, state: FSMContext):
@@ -3016,6 +3258,162 @@ async def callback_post_brief_back(callback: CallbackQuery, state: FSMContext):
         )
 
 
+# =============================================================================
+# СЦЕНАРИЙ ИЗ ПОСТА
+# =============================================================================
+
+def get_script_type_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора типа сценария"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎙 Голосовое (45-90 сек)", callback_data="script_type_voice")],
+        [InlineKeyboardButton(text="⭕ Кружок (20-40 сек)", callback_data="script_type_circle")],
+        [InlineKeyboardButton(text="⬅️ Назад к посту", callback_data="script_back")]
+    ])
+
+
+def get_script_result_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура после генерации сценария"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="script_regen"),
+            InlineKeyboardButton(text="📋 Скопировать", callback_data="script_copy")
+        ],
+        [InlineKeyboardButton(text="⬅️ Назад к посту", callback_data="script_back")]
+    ])
+
+
+async def callback_post_to_script(callback: CallbackQuery, state: FSMContext):
+    """Конвертация поста в сценарий — выбор типа"""
+    data = await state.get_data()
+    post = data.get("generated_post", "")
+
+    if not post:
+        await callback.answer("Пост не найден")
+        return
+
+    await callback.answer()
+    await callback.message.edit_text(
+        "🎙️ Выбери тип сценария:\n\n"
+        "🎙 **Голосовое** — 45-90 сек, с таймкодами\n"
+        "⭕ **Кружок** — 20-40 сек, с визуальными подсказками",
+        reply_markup=get_script_type_keyboard(),
+        parse_mode="Markdown"
+    )
+
+
+async def callback_script_type(callback: CallbackQuery, state: FSMContext):
+    """Генерация сценария выбранного типа"""
+    from utils.script_generator import generate_voice_script, generate_circle_script
+
+    script_type = callback.data.replace("script_type_", "")
+
+    if script_type == "back":
+        data = await state.get_data()
+        post = data.get("generated_post", "")
+        if post:
+            preview = post[:3500] + "..." if len(post) > 3500 else post
+            await callback.message.edit_text(
+                f"📝 Пост:\n\n{preview}",
+                reply_markup=get_post_edit_keyboard()
+            )
+        await callback.answer()
+        return
+
+    data = await state.get_data()
+    post = data.get("generated_post", "")
+    client_slug = data.get("current_client")
+
+    type_names = {"voice": "голосовое", "circle": "кружок"}
+    await callback.message.edit_text(f"⏳ Генерирую сценарий для {type_names.get(script_type, 'контента')}...")
+    await callback.answer()
+
+    try:
+        context = get_client_prompt(client_slug) if client_slug else ""
+
+        if script_type == "voice":
+            script = generate_voice_script(post, "medium", context)
+        else:
+            script = generate_circle_script(post, "short", context)
+
+        # Сохраняем сценарий
+        await state.update_data(
+            generated_script=script,
+            script_type=script_type
+        )
+
+        preview = script[:3500] + "..." if len(script) > 3500 else script
+        emoji = "🎙" if script_type == "voice" else "⭕"
+        await callback.message.answer(
+            f"{emoji} Сценарий готов:\n\n{preview}",
+            reply_markup=get_script_result_keyboard()
+        )
+
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка генерации: {e}")
+
+
+async def callback_script_regen(callback: CallbackQuery, state: FSMContext):
+    """Перегенерировать сценарий"""
+    from utils.script_generator import generate_voice_script, generate_circle_script
+
+    data = await state.get_data()
+    post = data.get("generated_post", "")
+    script_type = data.get("script_type", "voice")
+    client_slug = data.get("current_client")
+
+    await callback.answer("Перегенерирую...")
+    await callback.message.edit_text("⏳ Генерирую новый вариант сценария...")
+
+    try:
+        context = get_client_prompt(client_slug) if client_slug else ""
+
+        if script_type == "voice":
+            script = generate_voice_script(post, "medium", context)
+        else:
+            script = generate_circle_script(post, "short", context)
+
+        await state.update_data(generated_script=script)
+
+        preview = script[:3500] + "..." if len(script) > 3500 else script
+        emoji = "🎙" if script_type == "voice" else "⭕"
+        await callback.message.answer(
+            f"{emoji} Новый сценарий:\n\n{preview}",
+            reply_markup=get_script_result_keyboard()
+        )
+
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка: {e}")
+
+
+async def callback_script_copy(callback: CallbackQuery, state: FSMContext):
+    """Скопировать сценарий"""
+    data = await state.get_data()
+    script = data.get("generated_script", "")
+
+    if script:
+        await callback.message.answer(script)
+        await callback.answer("Сценарий отправлен для копирования")
+    else:
+        await callback.answer("Сценарий не найден")
+
+
+async def callback_script_back(callback: CallbackQuery, state: FSMContext):
+    """Вернуться к посту из сценария"""
+    data = await state.get_data()
+    post = data.get("generated_post", "")
+
+    await callback.answer()
+
+    if post:
+        preview = post[:3500] + "..." if len(post) > 3500 else post
+        await callback.message.edit_text(
+            f"📝 Пост:\n\n{preview}",
+            reply_markup=get_post_edit_keyboard()
+        )
+    else:
+        await callback.message.edit_text("Пост не найден")
+
+
 async def callback_post_done(callback: CallbackQuery, state: FSMContext):
     """Завершить работу с постом"""
     # Сохраняем current_client перед очисткой
@@ -3061,7 +3459,16 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(callback_post_brief_approve, F.data == "post_brief_approve")
     dp.callback_query.register(callback_post_brief_edit, F.data == "post_brief_edit")
     dp.callback_query.register(callback_post_brief_back, F.data == "post_brief_back")
+    dp.callback_query.register(callback_post_brief_expand, F.data == "post_brief_expand")
+    dp.callback_query.register(callback_post_brief_compact, F.data == "post_brief_compact")
     dp.message.register(process_post_brief_edit, ContentStates.waiting_for_post_brief_edit)
+
+    # Сценарий из поста (регистрируем ДО общего post_)
+    dp.callback_query.register(callback_post_to_script, F.data == "post_to_script")
+    dp.callback_query.register(callback_script_type, F.data.startswith("script_type_"))
+    dp.callback_query.register(callback_script_regen, F.data == "script_regen")
+    dp.callback_query.register(callback_script_copy, F.data == "script_copy")
+    dp.callback_query.register(callback_script_back, F.data == "script_back")
 
     # Выбор даты поста (регистрируем ДО общего post_)
     dp.callback_query.register(callback_post_date, F.data.startswith("post_date_"))

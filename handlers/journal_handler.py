@@ -12,6 +12,7 @@ from utils.content_journal import (
     add_entry, load_journal, format_journal_calendar,
     get_week_start, get_entries_by_date, get_entries_by_week,
     clear_day, clear_week, fill_week_from_plan, get_week_stats,
+    add_planned_topics, get_entry_by_id, update_entry,
     FORMAT_MAP
 )
 from utils.history_index import find_similar_entries, get_stats, build_history_index
@@ -28,6 +29,8 @@ class JournalStates(StatesGroup):
     waiting_for_custom_date = State()  # Ввод даты вручную
     # Управление журналом
     waiting_for_edit_day_formats = State()  # Ввод форматов для дня
+    # Plan-only режим (без генерации)
+    waiting_for_plan_topics = State()  # Ввод тем для плана
 
 
 def get_format_keyboard() -> InlineKeyboardMarkup:
@@ -97,6 +100,10 @@ def get_week_nav_keyboard(week_start: datetime) -> InlineKeyboardMarkup:
             InlineKeyboardButton(
                 text="➕ Добавить пост",
                 callback_data="journal_add_manual"
+            ),
+            InlineKeyboardButton(
+                text="🗓 Заполнить план",
+                callback_data=f"journal_plan_only_{week_str}"
             ),
         ],
         # Кнопки управления
@@ -907,6 +914,298 @@ async def callback_fill_week(callback: CallbackQuery, state: FSMContext):
     )
 
 
+# =============================================================================
+# PLAN-ONLY РЕЖИМ: Заполнение журнала БЕЗ генерации контента
+# =============================================================================
+
+async def callback_plan_only(callback: CallbackQuery, state: FSMContext):
+    """Начало заполнения плана без генерации — выбор дня"""
+    week_str = callback.data.replace("journal_plan_only_", "")
+    week_start = datetime.strptime(week_str, "%Y-%m-%d")
+
+    await state.update_data(journal_week_start=week_str)
+
+    await callback.message.edit_text(
+        "🗓 *Заполнить план (без генерации)*\n\n"
+        "Выбери день для добавления тем:",
+        parse_mode="Markdown",
+        reply_markup=get_days_keyboard(week_start, "planonly")
+    )
+    await callback.answer()
+
+
+async def callback_plan_only_select_day(callback: CallbackQuery, state: FSMContext):
+    """Выбран день для заполнения плана — запрос тем"""
+    date_str = callback.data.replace("journal_planonly_select_", "")
+    data = await state.get_data()
+    client = data.get("current_client")
+    week_str = data.get("journal_week_start", "")
+
+    if not client:
+        await callback.answer("Сначала выбери клиента")
+        return
+
+    # Сохраняем selected_date — это source of truth для даты записей
+    await state.update_data(plan_only_date=date_str)
+
+    date_display = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m")
+
+    # Текущие записи на этот день
+    entries = get_entries_by_date(client, date_str)
+    if entries:
+        current_text = f"Сейчас: {len(entries)} записей"
+    else:
+        current_text = "Пусто"
+
+    await callback.message.edit_text(
+        f"🗓 *Заполнение плана: {date_display}*\n\n"
+        f"{current_text}\n\n"
+        "Введи темы постов — *каждая тема с новой строки*:\n\n"
+        "_Пример:_\n"
+        "`ЖК у метро за 15 млн`\n"
+        "`Ошибки при покупке квартиры`\n"
+        "`Обзор района Хамовники`",
+        parse_mode="Markdown"
+    )
+    await state.set_state(JournalStates.waiting_for_plan_topics)
+    await callback.answer()
+
+
+async def process_plan_topics(message: types.Message, state: FSMContext):
+    """Обработка ввода тем для plan-only"""
+    data = await state.get_data()
+    client = data.get("current_client")
+    date_str = data.get("plan_only_date", "")  # selected_date — source of truth
+    week_str = data.get("journal_week_start", "")
+
+    if not client or not date_str:
+        await message.answer("❌ Ошибка: потеряны данные. Попробуй снова /journal")
+        await state.set_state(None)
+        return
+
+    # Парсим темы (каждая строка — отдельная тема)
+    topics = [line.strip() for line in message.text.strip().split("\n") if line.strip()]
+
+    if not topics:
+        await message.answer("❌ Не найдено тем. Введи хотя бы одну тему.")
+        return
+
+    # Создаём planned записи с selected_date
+    entry_ids = add_planned_topics(
+        client_slug=client,
+        date=date_str,  # selected_date — НЕ datetime.now()!
+        topics=topics
+    )
+
+    date_display = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d.%m")
+
+    await message.answer(
+        f"✅ *Добавлено в план: {len(entry_ids)} тем*\n\n"
+        f"📅 Дата: {date_display}\n"
+        f"📝 Темы:\n" + "\n".join([f"• {t[:50]}{'...' if len(t) > 50 else ''}" for t in topics]),
+        parse_mode="Markdown"
+    )
+
+    # Возвращаемся к журналу
+    await state.set_state(None)
+
+    if week_str:
+        week_start = datetime.strptime(week_str, "%Y-%m-%d")
+        calendar_text = format_journal_calendar(client, week_start)
+        await message.answer(
+            calendar_text,
+            parse_mode="Markdown",
+            reply_markup=get_week_nav_keyboard(week_start)
+        )
+
+
+# =============================================================================
+# ГЕНЕРАЦИЯ ПО PLANNED-ENTRY: Кнопка генерации для записей в плане
+# =============================================================================
+
+def get_entry_actions_keyboard(entry_id: str, date_str: str) -> InlineKeyboardMarkup:
+    """Клавиатура действий для записи в плане"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="⚙️ Сгенерировать пост",
+                callback_data=f"journal_generate_{entry_id}"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="✅ Отметить опубликованным",
+                callback_data=f"journal_publish_{entry_id}"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="🗑 Удалить",
+                callback_data=f"journal_delete_{entry_id}"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="↩️ Назад",
+                callback_data=f"journal_week_current"
+            ),
+        ]
+    ])
+
+
+async def callback_view_day_entries(callback: CallbackQuery, state: FSMContext):
+    """Просмотр записей дня с действиями"""
+    # Пока не реализовано — можно добавить позже
+    pass
+
+
+async def callback_generate_entry(callback: CallbackQuery, state: FSMContext):
+    """Генерация поста по planned-entry"""
+    entry_id = callback.data.replace("journal_generate_", "")
+    data = await state.get_data()
+    client = data.get("current_client")
+
+    if not client:
+        await callback.answer("Сначала выбери клиента")
+        return
+
+    entry = get_entry_by_id(client, entry_id)
+    if not entry:
+        await callback.answer("Запись не найдена")
+        return
+
+    # Запоминаем entry для генерации
+    # ВАЖНО: entry.date уже содержит selected_date, НЕ меняем его
+    await state.update_data(
+        generate_entry_id=entry_id,
+        generate_entry_date=entry.get("date"),  # сохраняем оригинальную дату
+        generate_entry_topic=entry.get("text", "")
+    )
+
+    await callback.message.edit_text(
+        f"⚙️ *Генерация поста*\n\n"
+        f"📅 Дата: {entry.get('date', 'N/A')}\n"
+        f"📝 Тема: {entry.get('text', 'Без темы')[:100]}\n\n"
+        "Выбери формат поста:",
+        parse_mode="Markdown",
+        reply_markup=get_generate_format_keyboard(entry_id)
+    )
+    await callback.answer()
+
+
+def get_generate_format_keyboard(entry_id: str) -> InlineKeyboardMarkup:
+    """Клавиатура выбора формата для генерации"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🏢 Лидген", callback_data=f"gen_format_lidgen_{entry_id}"),
+            InlineKeyboardButton(text="📈 Кейс", callback_data=f"gen_format_case_{entry_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="💡 Эксперт", callback_data=f"gen_format_expert_{entry_id}"),
+            InlineKeyboardButton(text="📰 Дайджест", callback_data=f"gen_format_digest_{entry_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="↩️ Отмена", callback_data="journal_week_current"),
+        ]
+    ])
+
+
+async def callback_generate_with_format(callback: CallbackQuery, state: FSMContext):
+    """Генерация поста с выбранным форматом"""
+    # Парсим: gen_format_lidgen_entry_123
+    parts = callback.data.split("_")
+    format_type = parts[2]  # lidgen, case, etc.
+    entry_id = "_".join(parts[3:])  # entry_123
+
+    data = await state.get_data()
+    client = data.get("current_client")
+    entry_date = data.get("generate_entry_date")  # Оригинальная дата записи
+    entry_topic = data.get("generate_entry_topic", "")
+
+    if not client:
+        await callback.answer("Сначала выбери клиента")
+        return
+
+    await callback.answer("Генерирую...")
+
+    # Здесь можно вызвать генерацию через Claude API
+    # Пока просто обновим запись с форматом
+    # ВАЖНО: НЕ меняем entry.date при генерации!
+
+    update_entry(client, entry_id, {
+        "format": format_type,
+        "status": "planned"  # остаётся planned пока не опубликован
+    })
+
+    format_name = FORMAT_MAP.get(format_type, format_type)
+
+    await callback.message.edit_text(
+        f"✅ *Формат выбран: {format_name}*\n\n"
+        f"📅 Дата: {entry_date}\n"
+        f"📝 Тема: {entry_topic[:100]}\n\n"
+        "Используй /post для генерации текста с этой темой.",
+        parse_mode="Markdown"
+    )
+
+
+async def callback_publish_entry(callback: CallbackQuery, state: FSMContext):
+    """Отметить запись как опубликованную"""
+    entry_id = callback.data.replace("journal_publish_", "")
+    data = await state.get_data()
+    client = data.get("current_client")
+
+    if not client:
+        await callback.answer("Сначала выбери клиента")
+        return
+
+    entry = get_entry_by_id(client, entry_id)
+    if not entry:
+        await callback.answer("Запись не найдена")
+        return
+
+    # ВАЖНО: при публикации НЕ меняем дату, только статус
+    update_entry(client, entry_id, {"status": "published"})
+
+    await callback.answer("Отмечено как опубликованное")
+
+    # Обновляем журнал
+    week_start = get_week_start()
+    calendar_text = format_journal_calendar(client, week_start)
+    await callback.message.edit_text(
+        calendar_text,
+        parse_mode="Markdown",
+        reply_markup=get_week_nav_keyboard(week_start)
+    )
+
+
+async def callback_delete_entry(callback: CallbackQuery, state: FSMContext):
+    """Удалить запись"""
+    from utils.content_journal import delete_entry
+
+    entry_id = callback.data.replace("journal_delete_", "")
+    data = await state.get_data()
+    client = data.get("current_client")
+
+    if not client:
+        await callback.answer("Сначала выбери клиента")
+        return
+
+    deleted = delete_entry(client, entry_id)
+    if deleted:
+        await callback.answer("Удалено")
+    else:
+        await callback.answer("Не удалось удалить")
+
+    # Обновляем журнал
+    week_start = get_week_start()
+    calendar_text = format_journal_calendar(client, week_start)
+    await callback.message.edit_text(
+        calendar_text,
+        parse_mode="Markdown",
+        reply_markup=get_week_nav_keyboard(week_start)
+    )
+
+
 def register_handlers(dp: Dispatcher):
     """Регистрация хендлеров журнала"""
     # Команда /journal
@@ -1003,4 +1302,36 @@ def register_handlers(dp: Dispatcher):
     dp.message.register(
         process_edit_day_formats,
         JournalStates.waiting_for_edit_day_formats
+    )
+
+    # Plan-only режим (без генерации)
+    dp.callback_query.register(
+        callback_plan_only,
+        F.data.startswith("journal_plan_only_")
+    )
+    dp.callback_query.register(
+        callback_plan_only_select_day,
+        F.data.startswith("journal_planonly_select_")
+    )
+    dp.message.register(
+        process_plan_topics,
+        JournalStates.waiting_for_plan_topics
+    )
+
+    # Действия с записями (генерация, публикация, удаление)
+    dp.callback_query.register(
+        callback_generate_entry,
+        F.data.startswith("journal_generate_")
+    )
+    dp.callback_query.register(
+        callback_generate_with_format,
+        F.data.startswith("gen_format_")
+    )
+    dp.callback_query.register(
+        callback_publish_entry,
+        F.data.startswith("journal_publish_")
+    )
+    dp.callback_query.register(
+        callback_delete_entry,
+        F.data.startswith("journal_delete_")
     )

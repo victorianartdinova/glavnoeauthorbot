@@ -21,36 +21,53 @@ def add_entry(
     lot_id: Optional[str] = None,
     lot_name: Optional[str] = None,
     published_at: Optional[str] = None,
-    link: Optional[str] = None
+    link: Optional[str] = None,
+    generated: bool = True
 ) -> int:
     """
     Добавить запись в журнал.
 
     Args:
         client_slug: slug клиента
-        date: дата публикации (YYYY-MM-DD)
+        date: дата публикации (YYYY-MM-DD) — SOURCE OF TRUTH для даты записи
         format_type: формат (lidgen, case, meme, expert, digest, live, circle, podcast)
         text: полный текст поста
         status: planned | published
-        source: bot_generated | forwarded | from_plan
+        source: bot_generated | forwarded | from_plan | manual
         hook_type: тип хука (financial, location, premium, urgency, emotional)
         angle: угол/подход поста
         cta: call-to-action слово
         lot_id: ID лота (если есть)
         lot_name: название лота/ЖК
-        published_at: фактическое время публикации
+        published_at: фактическое время публикации (если не указано — берётся из date)
         link: ссылка на пост в канале
+        generated: True если контент сгенерирован, False если только тема (plan-only)
 
     Returns:
         ID записи
     """
-    # Конвертируем date в ISO datetime для planned_for
-    planned_for = None
-    if date and status == "planned":
+    # ВАЖНО: date — это source of truth для даты записи
+    # Конвертируем date в ISO datetime
+    date_iso = None
+    if date:
         try:
-            planned_for = datetime.strptime(date, "%Y-%m-%d").isoformat()
+            date_iso = datetime.strptime(date, "%Y-%m-%d").isoformat()
         except ValueError:
-            planned_for = None
+            date_iso = None
+
+    # planned_for всегда устанавливается на основе date
+    planned_for = date_iso
+
+    # published_at: если передан явно — используем, иначе для published берём date
+    if status == "published":
+        if published_at:
+            pub_time = published_at
+        elif date_iso:
+            pub_time = date_iso  # Используем selected_date, а не now()
+        else:
+            pub_time = now_iso()
+    else:
+        pub_time = None
 
     with db_connection() as conn:
         store = PostsStore(conn)
@@ -69,9 +86,8 @@ def add_entry(
             link=link
         )
 
-        # Если уже опубликован, устанавливаем published_at
-        if status == "published":
-            pub_time = published_at or now_iso()
+        # Устанавливаем published_at для опубликованных записей
+        if pub_time:
             store.update(post_id, published_at=pub_time)
 
     # Обновляем индекс истории (для совместимости)
@@ -180,15 +196,21 @@ def load_journal(client_slug: str) -> List[Dict]:
 
 
 def _extract_date(post: Dict) -> str:
-    """Извлечь дату из поста (YYYY-MM-DD)"""
-    if post.get("published_at"):
-        try:
-            return post["published_at"][:10]
-        except:
-            pass
+    """
+    Извлечь дату из поста (YYYY-MM-DD).
+
+    Приоритет: planned_for > published_at > created_at
+    Это обеспечивает использование selected_date как source of truth.
+    """
+    # planned_for — приоритет, так как это selected_date при создании
     if post.get("planned_for"):
         try:
             return post["planned_for"][:10]
+        except:
+            pass
+    if post.get("published_at"):
+        try:
+            return post["published_at"][:10]
         except:
             pass
     if post.get("created_at"):
@@ -486,6 +508,74 @@ def get_week_stats(client_slug: str, week_start: datetime) -> Dict[str, int]:
         "planned": len([e for e in all_entries if e["status"] == "planned"]),
         "total": len(all_entries)
     }
+
+
+def add_planned_topics(
+    client_slug: str,
+    date: str,
+    topics: List[str],
+    format_type: Optional[str] = None
+) -> List[int]:
+    """
+    Добавить темы в план БЕЗ генерации контента.
+
+    Создаёт записи со статусом "planned" и пустым текстом.
+    Темы отображаются как "В плане" и не увеличивают счётчик "Опубликовано".
+
+    Args:
+        client_slug: slug клиента
+        date: дата (YYYY-MM-DD) — selected_date из UI
+        topics: список тем (каждая строка — отдельная запись)
+        format_type: формат (опционально)
+
+    Returns:
+        Список ID созданных записей
+    """
+    entry_ids = []
+
+    for topic in topics:
+        topic = topic.strip()
+        if not topic:
+            continue
+
+        entry_id = add_entry(
+            client_slug=client_slug,
+            date=date,  # selected_date — source of truth
+            format_type=format_type or "lidgen",
+            text=topic,  # только тема, не сгенерированный текст
+            status="planned",
+            source="plan_only",  # новый source для различения
+            generated=False
+        )
+        entry_ids.append(entry_id)
+
+    return entry_ids
+
+
+def get_entry_by_id(client_slug: str, entry_id: str) -> Optional[Dict]:
+    """
+    Получить запись по ID.
+
+    Args:
+        client_slug: slug клиента
+        entry_id: ID записи (формат "entry_123" или "123")
+
+    Returns:
+        Dict с записью или None
+    """
+    try:
+        post_id = int(entry_id.replace("entry_", "")) if entry_id.startswith("entry_") else int(entry_id)
+    except ValueError:
+        return None
+
+    with db_connection() as conn:
+        store = PostsStore(conn)
+        post = store.get(post_id)
+
+    if not post or post.get("client_id") != client_slug:
+        return None
+
+    return _post_to_entry(post)
 
 
 # ============

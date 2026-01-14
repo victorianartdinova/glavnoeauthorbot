@@ -9,11 +9,13 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQu
 import config
 from utils.plan_storage import (
     load_plan, update_post, save_plan, parse_plan_from_text, get_day_display,
-    add_post_to_day, delete_post_from_day, get_post_by_id, is_protected_format
+    add_post_to_day, delete_post_from_day, get_post_by_id, is_protected_format,
+    delete_plan, list_plans
 )
 from utils.team_chat import send_brief_to_designer, send_post_to_operator
 from utils.client_context import get_client_prompt, get_client_designer, get_emoji_prompt_section
-from utils.claude_api import generate_content, validate_lidgen_topic
+from utils.claude_api import generate_content, generate_content_with_memory, validate_lidgen_topic
+from utils.markdown_escape import escape_md
 
 
 class PlanStates(StatesGroup):
@@ -25,7 +27,7 @@ class PlanStates(StatesGroup):
     adding_post_topic = State()       # Ввод темы нового поста
 
 
-def get_plan_days_keyboard(plan: dict) -> InlineKeyboardMarkup:
+def get_plan_days_keyboard(plan: dict, show_clear: bool = True) -> InlineKeyboardMarkup:
     """Клавиатура с днями плана (по 4 в ряд)"""
     days = plan.get("days", [])
     buttons = []
@@ -51,6 +53,10 @@ def get_plan_days_keyboard(plan: dict) -> InlineKeyboardMarkup:
 
     if row:
         buttons.append(row)
+
+    # Кнопка очистки плана
+    if show_clear:
+        buttons.append([InlineKeyboardButton(text="🗑 Очистить план", callback_data="plan_clear")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -553,6 +559,7 @@ async def callback_write_post(callback: CallbackQuery, state: FSMContext):
 
 ПРАВИЛА:
 - НЕ используй markdown
+- ЗАПРЕЩЕНО указывать название ЖК, девелопера, застройщика — используй "Жилой комплекс", "Проект", "Комплекс у парка"
 - Короткие абзацы
 - Конкретные цифры"""
 
@@ -562,9 +569,11 @@ async def callback_write_post(callback: CallbackQuery, state: FSMContext):
 Формат: {format_type}
 День: {day.get('date', '')} ({day.get('weekday', '')})
 
+ВАЖНО: Название ЖК и застройщика — служебная информация. В посте их указывать ЗАПРЕЩЕНО.
+
 Сделай пост готовым к публикации."""
 
-        post_text = generate_content(system_prompt, user_prompt)
+        post_text = generate_content_with_memory(client_slug, system_prompt, user_prompt)
 
         # Сохраняем пост в state
         await state.update_data(
@@ -723,6 +732,7 @@ async def callback_brief_from_topic(callback: CallbackQuery, state: FSMContext):
 - НЕ указывай название ЖК и девелопера
 - Текст плашек: UPPERCASE, 2-4 слова
 - Время до метро: "мин." (не "минут")
+- Если есть данные о первом взносе — пиши "ПЕРВЫЙ ВЗНОС", не сокращай до "ВЗНОС"
 
 ЗАПРЕЩЕНО:
 - Абстракции ("история встречается с будущим")
@@ -829,6 +839,7 @@ async def process_lot_data_for_brief(message: types.Message, state: FSMContext):
 - НЕ указывай название ЖК и девелопера
 - Текст плашек: UPPERCASE, 2-4 слова
 - Время до метро: "мин." (не "минут")
+- Если есть данные о первом взносе — пиши "ПЕРВЫЙ ВЗНОС", не сокращай до "ВЗНОС"
 
 ЗАПРЕЩЕНО:
 - Абстракции ("история встречается с будущим")
@@ -923,11 +934,109 @@ async def process_edit_brief(message: types.Message, state: FSMContext):
     )
 
 
+# === ОЧИСТКА ПЛАНА ===
+
+async def callback_plan_clear(callback: CallbackQuery, state: FSMContext):
+    """Показать подтверждение очистки плана"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, удалить", callback_data="plan_clear_confirm"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="plan_back")
+        ]
+    ])
+
+    await callback.message.edit_text(
+        "🗑 **Удалить текущий контент-план?**\n\n"
+        "Это действие необратимо.",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+async def callback_plan_clear_confirm(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение очистки плана"""
+    data = await state.get_data()
+    client_slug = data.get("current_client")
+    plan_id = data.get("current_plan_id")
+
+    if not client_slug:
+        await callback.answer("Клиент не выбран")
+        return
+
+    success = delete_plan(client_slug, plan_id)
+
+    if success:
+        # Очищаем данные плана из state
+        await state.update_data(current_plan_id=None)
+        await callback.message.edit_text(
+            "✅ Контент-план удалён.\n\n"
+            "Создай новый план через 📅 Контент-план"
+        )
+        await callback.answer("План удалён")
+    else:
+        await callback.answer("Ошибка удаления", show_alert=True)
+
+
+async def cmd_plan_export_csv(message: types.Message, state: FSMContext):
+    """Экспорт плана в CSV/текстовый формат"""
+    if not config.ENABLE_PLAN_EXPORT:
+        await message.answer("Функция выключена (ENABLE_PLAN_EXPORT=0)")
+        return
+
+    data = await state.get_data()
+    client_slug = data.get("current_client")
+
+    if not client_slug:
+        await message.answer("⚠️ Сначала выбери клиента")
+        return
+
+    plan = load_plan(client_slug)
+
+    if not plan:
+        await message.answer(f"⚠️ Нет плана для {client_slug}")
+        return
+
+    # Формируем CSV-текст
+    lines = ["date | client | format | topic | status"]
+    lines.append("-" * 60)
+
+    for day in plan.get("days", []):
+        date = day.get("date", "")
+        for post in day.get("posts", []):
+            fmt = post.get("format", "ПОСТ")
+            topic = post.get("topic", "").replace("|", "/")[:50]
+            status = post.get("status", "pending")
+            lines.append(f"{date} | {client_slug} | {fmt} | {topic} | {status}")
+
+    csv_text = "\n".join(lines)
+
+    # Отправляем как текст (Telegram ограничение 4096)
+    if len(csv_text) > 4000:
+        # Разбиваем на части
+        parts = [csv_text[i:i+4000] for i in range(0, len(csv_text), 4000)]
+        for part in parts:
+            await message.answer(f"```\n{part}\n```", parse_mode="Markdown")
+    else:
+        await message.answer(
+            f"📋 *Контент-план {client_slug}*\n\n"
+            f"```\n{csv_text}\n```",
+            parse_mode="Markdown"
+        )
+
+
 def register_handlers(dp: Dispatcher):
     """Регистрация обработчиков плана"""
+    # Команда экспорта плана
+    from aiogram.filters import Command
+    dp.message.register(cmd_plan_export_csv, Command("plan_export_csv"))
+
     # Callback для дней плана
     dp.callback_query.register(callback_plan_day, F.data.startswith("plan_day_"))
     dp.callback_query.register(callback_plan_back, F.data == "plan_back")
+
+    # Callback для очистки плана
+    dp.callback_query.register(callback_plan_clear, F.data == "plan_clear")
+    dp.callback_query.register(callback_plan_clear_confirm, F.data == "plan_clear_confirm")
 
     # Callback для просмотра поста
     dp.callback_query.register(callback_post_view, F.data.startswith("post_view_"))

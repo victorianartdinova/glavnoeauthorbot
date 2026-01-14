@@ -419,10 +419,130 @@ def generate_brief_short_from_package(lot: dict, package: dict) -> str:
     return "\n".join(lines)
 
 
+def get_plan_date_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора даты для плана"""
+    from datetime import datetime, timedelta
+
+    today = datetime.now()
+    weekdays_ru = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+
+    buttons = []
+    # Сегодня
+    buttons.append([
+        InlineKeyboardButton(
+            text=f"📅 Сегодня ({today.strftime('%d.%m')})",
+            callback_data="pkg:plan_date:today"
+        )
+    ])
+
+    # Следующие 5 рабочих дней
+    row = []
+    days_added = 0
+    day_offset = 1
+    while days_added < 5:
+        next_day = today + timedelta(days=day_offset)
+        if next_day.weekday() < 5:  # Пн-Пт
+            weekday = weekdays_ru[next_day.weekday()]
+            row.append(InlineKeyboardButton(
+                text=f"{weekday} {next_day.strftime('%d.%m')}",
+                callback_data=f"pkg:plan_date:{next_day.strftime('%Y-%m-%d')}"
+            ))
+            days_added += 1
+            if len(row) == 3:
+                buttons.append(row)
+                row = []
+        day_offset += 1
+
+    if row:
+        buttons.append(row)
+
+    buttons.append([
+        InlineKeyboardButton(text="❌ Отмена", callback_data="pkg:done")
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 async def callback_add_to_plan(callback: types.CallbackQuery, state: FSMContext):
-    """Добавление в план"""
-    # TODO: реализовать после [E]
-    await callback.answer("🚧 В разработке", show_alert=True)
+    """Добавление в план — шаг 1: выбор даты"""
+    if not config.ENABLE_PLAN_EXPORT:
+        await callback.answer("Функция выключена (ENABLE_PLAN_EXPORT=0)", show_alert=True)
+        return
+
+    await callback.message.answer(
+        "📅 На какую дату добавить в план?",
+        reply_markup=get_plan_date_keyboard()
+    )
+    await state.set_state(PackageLotStates.waiting_for_date)
+    await callback.answer()
+
+
+async def callback_plan_date(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка выбора даты для плана"""
+    from datetime import datetime
+    from utils.plan_storage import add_post_to_day, load_plan, save_plan
+
+    date_value = callback.data.replace("pkg:plan_date:", "")
+
+    if date_value == "today":
+        plan_date = datetime.now().strftime("%Y-%m-%d")
+    else:
+        plan_date = date_value
+
+    data = await state.get_data()
+    client_slug = data.get("pkg_client") or data.get("current_client")
+    lot = data.get("pkg_lot", {})
+    package = data.get("pkg_result", {})
+
+    # Получаем заголовок
+    title = package.get("titles", ["Лидген-карточки"])[0] if package.get("titles") else "Лидген-карточки"
+    lot_id = lot.get("lot_id", "")
+
+    # Загружаем текущий план
+    plan = load_plan(client_slug)
+
+    if plan:
+        # Ищем день с нужной датой
+        plan_id = plan.get("plan_id")
+        target_day = None
+        for day in plan.get("days", []):
+            if date_value in day.get("date", "") or day.get("date", "") in plan_date:
+                target_day = day
+                break
+
+        if target_day:
+            # Добавляем пост к существующему дню
+            post_id = add_post_to_day(
+                client_slug=client_slug,
+                plan_id=plan_id,
+                day_num=target_day["day"],
+                format_type="leadgen_cards",
+                topic=title,
+                is_ads=False
+            )
+            if post_id:
+                await callback.message.answer(
+                    f"✅ Добавлено в план!\n\n"
+                    f"📅 Дата: {plan_date}\n"
+                    f"📋 Формат: leadgen_cards\n"
+                    f"📝 Тема: {title}\n"
+                    f"🏷 Лот: {lot_id}"
+                )
+            else:
+                await callback.message.answer("⚠️ Не удалось добавить в план")
+        else:
+            await callback.message.answer(
+                f"⚠️ Нет дня {plan_date} в текущем плане.\n"
+                f"Сначала создай план через 📅 Контент-план"
+            )
+    else:
+        await callback.message.answer(
+            f"⚠️ Нет активного плана для {client_slug}.\n"
+            f"Сначала создай план через 📅 Контент-план"
+        )
+
+    await state.set_state(None)
+    await callback.answer()
 
 
 async def callback_more_titles(callback: types.CallbackQuery, state: FSMContext):
@@ -498,7 +618,11 @@ def register_handlers(dp: Dispatcher):
     )
     dp.callback_query.register(
         callback_add_to_plan,
-        F.data.startswith("pkg:plan:")
+        F.data.startswith("pkg:plan:") & ~F.data.startswith("pkg:plan_date:")
+    )
+    dp.callback_query.register(
+        callback_plan_date,
+        F.data.startswith("pkg:plan_date:")
     )
     dp.callback_query.register(
         callback_more_titles,

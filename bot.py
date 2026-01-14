@@ -18,7 +18,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 import config
-from handlers import lot_handler, content_handler, metrics_handler, client_handler, plan_handler, journal_handler, meme_handler, focus_handler, voice_handler, dev_handler
+from handlers import lot_handler, content_handler, metrics_handler, client_handler, plan_handler, journal_handler, meme_handler, focus_handler, voice_handler, dev_handler, leadgen_cards_handler, package_lot_handler
 
 
 def get_clients_keyboard() -> ReplyKeyboardMarkup:
@@ -250,6 +250,7 @@ focus_handler.register_handlers(dp)
 voice_handler.register_handlers(dp)
 dev_handler.register_handlers(dp)
 metrics_handler.register_handlers(dp)
+package_lot_handler.register_handlers(dp)
 
 
 # === Запуск ===

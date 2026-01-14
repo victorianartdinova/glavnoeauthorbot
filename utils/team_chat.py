@@ -131,3 +131,27 @@ async def send_post_to_operator(bot: Bot, client_slug: str, post: str) -> bool:
         mention_designer=False,
         mention_operator=True
     )
+
+
+async def send_brief_short_to_team(bot: Bot, client_slug: str, brief: str) -> bool:
+    """
+    Отправить SHORT ТЗ в ветку клиента (для ENABLE_BRIEF_SHORT).
+
+    Args:
+        bot: экземпляр бота
+        client_slug: slug клиента
+        brief: текст короткого ТЗ
+
+    Returns:
+        True если успешно
+    """
+    header = "🎨 ТЗ SHORT\n"
+    full_brief = header + brief
+
+    return await send_to_team_chat(
+        bot=bot,
+        client_slug=client_slug,
+        message=full_brief,
+        mention_designer=True,
+        mention_operator=False
+    )

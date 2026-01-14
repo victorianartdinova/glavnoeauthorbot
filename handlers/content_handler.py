@@ -1693,9 +1693,17 @@ async def cmd_post(message: types.Message, state: FSMContext):
 
     await state.update_data(client_slug=client_slug)
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    # Формируем клавиатуру
+    buttons = [
         [InlineKeyboardButton(text="🏢 Лидген-карточка", callback_data="post_leadgen")],
         [InlineKeyboardButton(text="📦 Лидген + карточки", callback_data="post_leadgen_cards")],
+    ]
+
+    # Кнопка "Пакет по лоту" — только при флаге
+    if config.ENABLE_PACKAGE_BY_LOT:
+        buttons.append([InlineKeyboardButton(text="📦 Пакет по лоту", callback_data="post_package_lot")])
+
+    buttons.extend([
         [InlineKeyboardButton(text="🎠 Лидген-карусель (5-8)", callback_data="post_leadgen_carousel")],
         [InlineKeyboardButton(text="🔀 A/B баннер (2 варианта)", callback_data="post_leadgen_ab")],
         [InlineKeyboardButton(text="🎙 Пост с кружком", callback_data="post_circle")],
@@ -1703,6 +1711,8 @@ async def cmd_post(message: types.Message, state: FSMContext):
         [InlineKeyboardButton(text="📚 Экспертный контент", callback_data="post_expert")],
         [InlineKeyboardButton(text="😂 Мем", callback_data="post_meme")]
     ])
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
     await message.answer(
         "📝 Генерация поста\n\n"
@@ -1727,6 +1737,13 @@ async def callback_post_format(callback: CallbackQuery, state: FSMContext):
     if format_type == "leadgen_cards":
         from handlers.leadgen_cards_handler import cmd_leadgen_cards
         await cmd_leadgen_cards(callback.message, state)
+        await callback.answer()
+        return
+
+    # Пакет по лоту — переход в отдельный handler
+    if format_type == "package_lot":
+        from handlers.package_lot_handler import cmd_package_by_lot
+        await cmd_package_by_lot(callback.message, state)
         await callback.answer()
         return
 

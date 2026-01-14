@@ -7,7 +7,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Telegram Bot
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8499202304:AAF2FULsVpXGapbC3yvXpCdX3kvOgcdNvyU")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TELEGRAM_BOT_TOKEN:
+    raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")
 
 # Claude API (берётся из окружения Claude Code на сервере)
 CLAUDE_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -66,3 +68,9 @@ CONTENT_ANGLES = [
     "инвест",
     "семья"
 ]
+
+# === Feature Flags (по умолчанию OFF) ===
+ENABLE_LOT_CARD = os.getenv("ENABLE_LOT_CARD", "0") == "1"
+ENABLE_PACKAGE_BY_LOT = os.getenv("ENABLE_PACKAGE_BY_LOT", "0") == "1"
+ENABLE_BRIEF_SHORT = os.getenv("ENABLE_BRIEF_SHORT", "0") == "1"
+ENABLE_PLAN_EXPORT = os.getenv("ENABLE_PLAN_EXPORT", "0") == "1"

@@ -53,6 +53,7 @@ class ContentStates(StatesGroup):
     """Состояния для FSM"""
     waiting_for_brief_data = State()
     waiting_for_brief_ad_type = State()  # НОВОЕ: под рекламу или нет
+    waiting_for_brief_mode = State()  # SHORT / NORMAL / PRO (при ENABLE_BRIEF_SHORT)
     waiting_for_live_link = State()
     waiting_for_voice_topic = State()
     waiting_for_plan_client = State()
@@ -1116,7 +1117,46 @@ async def process_brief_data(message: types.Message, state: FSMContext):
 async def callback_brief_ad_type(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора типа размещения (реклама/канал)"""
     is_for_ads = callback.data == "brief_ad_yes"
+    await state.update_data(brief_is_for_ads=is_for_ads)
+
+    # Если флаг ENABLE_BRIEF_SHORT — спрашиваем режим
+    if config.ENABLE_BRIEF_SHORT:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⚡ SHORT", callback_data="brief_mode_short"),
+                InlineKeyboardButton(text="📋 NORMAL", callback_data="brief_mode_normal"),
+            ],
+            [
+                InlineKeyboardButton(text="📚 PRO (3 варианта)", callback_data="brief_mode_pro"),
+            ]
+        ])
+
+        await callback.message.edit_text(
+            "🎨 Выбери режим ТЗ:\n\n"
+            "⚡ *SHORT* — компактное (помещается на экран)\n"
+            "📋 *NORMAL* — стандартное\n"
+            "📚 *PRO* — 3 варианта с идеями",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+        await state.set_state(ContentStates.waiting_for_brief_mode)
+        await callback.answer()
+        return
+
+    # Без флага — сразу генерируем NORMAL
+    await generate_brief_with_mode(callback, state, "normal")
+
+
+async def callback_brief_mode(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора режима ТЗ"""
+    mode = callback.data.replace("brief_mode_", "")
+    await generate_brief_with_mode(callback, state, mode)
+
+
+async def generate_brief_with_mode(callback: CallbackQuery, state: FSMContext, mode: str):
+    """Генерация ТЗ с выбранным режимом"""
     data = await state.get_data()
+    is_for_ads = data.get("brief_is_for_ads", False)
 
     user_input = data.get("brief_input", "")
     url = data.get("brief_url")
@@ -1128,11 +1168,13 @@ async def callback_brief_ad_type(callback: CallbackQuery, state: FSMContext):
     pub_date, pub_weekday = get_next_publish_date()
 
     ad_type = "Реклама + канал" if is_for_ads else "Только канал"
+    mode_display = {"short": "SHORT", "normal": "NORMAL", "pro": "PRO"}.get(mode, "NORMAL")
 
     await callback.message.edit_text(
         f"📅 Дата: {pub_date} ({pub_weekday})\n"
         f"🎬 Формат: {format_display}\n"
-        f"📢 Тип: {ad_type}\n\n"
+        f"📢 Тип: {ad_type}\n"
+        f"🎨 Режим: {mode_display}\n\n"
         "⏳ Генерирую ТЗ..."
     )
     await callback.answer()
@@ -1145,6 +1187,53 @@ async def callback_brief_ad_type(callback: CallbackQuery, state: FSMContext):
             return
         emoji_section = get_emoji_prompt_section(client_slug)
 
+        # === SHORT режим — компактное ТЗ ===
+        if mode == "short":
+            short_system = """Ты — копирайтер. Создаёшь КОМПАКТНОЕ ТЗ для дизайнера.
+
+ФОРМАТ SHORT (строго):
+1. ИДЕЯ УПАКОВКИ (1 строка)
+2. КОЛ-ВО КАРТОЧЕК: N + ресайз сториз: да/нет
+3. ТЕКСТЫ:
+   [1] текст карточки 1
+   [2] текст карточки 2
+   ...
+4. ПЛАШКА/ЗАГОЛОВОК (если нужно) — 1 строка
+
+ЗАПРЕЩЕНО:
+- Длинные описания
+- Название ЖК и застройщика
+- Больше 12 строк всего"""
+
+            short_user = f"""Данные лота:
+{user_input}
+
+Создай КОМПАКТНОЕ ТЗ дизайнеру в формате SHORT.
+Максимум 12 строк. Только главное."""
+
+            brief = generate_content(short_system, short_user)
+
+            # Отправляем в командный чат
+            if config.TEAM_CHAT_ID:
+                try:
+                    bot: Bot = callback.message.bot
+                    thread_id = config.CLIENT_THREADS.get(client_slug)
+                    await bot.send_message(
+                        config.TEAM_CHAT_ID,
+                        f"🎨 *ТЗ SHORT* ({client_slug})\n\n{brief}",
+                        message_thread_id=thread_id,
+                        parse_mode="Markdown"
+                    )
+                    await callback.message.answer(f"✅ ТЗ SHORT отправлено\n\n{brief}")
+                except Exception as e:
+                    await callback.message.answer(f"📋 *ТЗ SHORT:*\n\n{brief}", parse_mode="Markdown")
+            else:
+                await callback.message.answer(f"📋 *ТЗ SHORT:*\n\n{brief}", parse_mode="Markdown")
+
+            await state.clear()
+            return
+
+        # === NORMAL/PRO режимы — стандартный промпт ===
         # Системный промпт (ОБНОВЛЁННЫЙ)
         system_prompt = f"""Ты — копирайтер Apple Real Estate. Создаёшь ТЗ для дизайнеров и лидген-посты.
 
@@ -3494,6 +3583,7 @@ def register_handlers(dp: Dispatcher):
     # Callback обработчики для inline-кнопок
     dp.callback_query.register(callback_post_format, F.data.startswith("post_"))
     dp.callback_query.register(callback_brief_ad_type, F.data.startswith("brief_ad_"))
+    dp.callback_query.register(callback_brief_mode, F.data.startswith("brief_mode_"))
 
     # Callback для контент-плана: начальные вопросы
     dp.callback_query.register(callback_plan_period, F.data.startswith("plan_period_"))

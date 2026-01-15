@@ -1,0 +1,41 @@
+{
+  "post_length": {
+    "min_words": 90,
+    "target_words": 130,
+    "max_words": 200
+  },
+  "banned_phrases": [
+    "честно говоря",
+    "если честно",
+    "откровенно говоря"
+  ],
+  "banned_openers": [
+    "Друзья!",
+    "Коллеги",
+    "Всем привет"
+  ],
+  "phrase_variation": true,
+  "hook_templates": [
+    "🏢 {location} — платёж от {payment}",
+    "💰 {price} за {property_type} в {class}",
+    "📍 {minutes} до {metro} — {condition}",
+    "🔑 Ключи {timeline} — успейте",
+    "🏡 Для тех, кто {target_audience}",
+    "❓ Ищете {what}? Подобрал вариант",
+    "💡 {insight} — важно знать",
+    "📊 {market_fact} — сейчас момент",
+    "🎯 {situation} — есть решение",
+    "✅ {benefit} — проверено на клиентах",
+    "⚡ Акция — {opportunity}",
+    "💼 Инвестиционная привлекательность: {percent}%",
+    "🏗️ Сдача {quarter} — {advantage}",
+    "🌳 {location_benefit} — редкость на рынке",
+    "👨‍👩‍👧 Семейная ипотека — {rate}%"
+  ],
+  "style_notes": {
+    "tone": "экспертный, персональный, доверительный",
+    "формат": "конкретика, кейсы, цифры",
+    "CTA": "личное приглашение к диалогу",
+    "эмодзи": "умеренно, для читаемости"
+  }
+}

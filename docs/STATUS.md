@@ -39,7 +39,10 @@
 - `utils/client_style.py` — валидация постов, стиль клиента
 - `utils/design_brief.py` — компактные и подробные ТЗ
 - `utils/script_generator.py` — сценарии для voice/circle
-- `docs/CLIENTS/nadejda_dmitruk/STYLE_CONFIG.json` — настройки стиля
+- `utils/post_actions.py` — кнопки дизайна/сценария для постов
+- `docs/CLIENTS/nadejda_dmitruk/STYLE_CONFIG.json` — настройки стиля Надежды
+- `docs/CLIENTS/apple_real_estate/STYLE_CONFIG.json` — настройки стиля Apple
+- `docs/CLIENTS/artem_solodkov/STYLE_CONFIG.json` — настройки стиля Артёма
 - `tests/test_content_improvements.py` — тесты
 
 ## In Progress

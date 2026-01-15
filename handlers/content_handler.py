@@ -36,6 +36,10 @@ from utils.client_style import (
     get_style_prompt_section, validate_post, fix_post_issues,
     get_post_length_requirements
 )
+from utils.post_actions import (
+    get_post_actions_keyboard, get_design_type_keyboard, get_script_type_keyboard,
+    generate_design_for_post, generate_script_for_post
+)
 
 
 def escape_markdown_v2(text: str) -> str:
@@ -79,7 +83,16 @@ class ContentStates(StatesGroup):
 
 def get_post_edit_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для редактирования сгенерированного поста"""
-    return InlineKeyboardMarkup(inline_keyboard=[
+    # Используем get_post_actions_keyboard из utils
+    base_keyboard = get_post_actions_keyboard(
+        post_id=None,
+        include_design=True,
+        include_script=True,
+        include_approve=False
+    )
+
+    # Добавляем кнопки редактирования и действий
+    edit_buttons = [
         [
             InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="post_regen"),
             InlineKeyboardButton(text="✏️ Изменить", callback_data="post_edit_request")
@@ -87,16 +100,21 @@ def get_post_edit_keyboard() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="💪 Жёстче", callback_data="post_harder"),
             InlineKeyboardButton(text="🌸 Мягче", callback_data="post_softer")
-        ],
-        [
-            InlineKeyboardButton(text="🎨 ТЗ дизайнеру", callback_data="post_brief"),
-            InlineKeyboardButton(text="🎙️ Сценарий", callback_data="post_to_script")
-        ],
+        ]
+    ]
+
+    # Кнопки дизайна и сценария из base_keyboard
+    action_buttons = base_keyboard.inline_keyboard
+
+    # Финальные кнопки
+    final_buttons = [
         [
             InlineKeyboardButton(text="📋 Скопировать", callback_data="post_copy"),
             InlineKeyboardButton(text="✅ Готово", callback_data="post_done")
         ]
-    ])
+    ]
+
+    return InlineKeyboardMarkup(inline_keyboard=edit_buttons + action_buttons + final_buttons)
 
 
 def get_plan_skip_keyboard(show_clear: bool = False) -> InlineKeyboardMarkup:
@@ -2914,7 +2932,7 @@ def get_brief_format_keyboard() -> InlineKeyboardMarkup:
 
 
 async def callback_post_brief(callback: CallbackQuery, state: FSMContext):
-    """Выбор формата ТЗ дизайнеру"""
+    """Выбор формата ТЗ дизайнеру через post_actions"""
     data = await state.get_data()
     post = data.get("generated_post", "")
     client_slug = data.get("current_client")
@@ -2928,12 +2946,17 @@ async def callback_post_brief(callback: CallbackQuery, state: FSMContext):
         return
 
     await callback.answer()
+
+    # Используем клавиатуру из post_actions
     await callback.message.edit_text(
-        "🎨 Выбери формат ТЗ:\n\n"
-        "🖼 **Баннер** — 1 статичная картинка\n"
+        "🎨 Выбери формат дизайна:\n\n"
+        "📱 **Баннер** — 1 статичная картинка\n"
         "🎬 **ГИФ-слайдер** — анимация 2-3 слайдов\n"
-        "📑 **Галерея** — карусель 4-5 карточек",
-        reply_markup=get_brief_format_keyboard(),
+        "📑 **Галерея** — карусель 4-5 карточек\n"
+        "🎠 **Карусель** — лидген 5-8 карточек\n\n"
+        "💡 **Компактное ТЗ** — короткое (800-1200 символов)\n"
+        "📋 **Подробное ТЗ** — развернутое с примерами",
+        reply_markup=get_design_type_keyboard(),
         parse_mode="Markdown"
     )
 
@@ -3389,7 +3412,7 @@ def get_script_result_keyboard() -> InlineKeyboardMarkup:
 
 
 async def callback_post_to_script(callback: CallbackQuery, state: FSMContext):
-    """Конвертация поста в сценарий — выбор типа"""
+    """Конвертация поста в сценарий — выбор типа через post_actions"""
     data = await state.get_data()
     post = data.get("generated_post", "")
 
@@ -3398,11 +3421,13 @@ async def callback_post_to_script(callback: CallbackQuery, state: FSMContext):
         return
 
     await callback.answer()
+
+    # Используем клавиатуру из post_actions
     await callback.message.edit_text(
-        "🎙️ Выбери тип сценария:\n\n"
-        "🎙 **Голосовое** — 45-90 сек, с таймкодами\n"
+        "🎙️ Выбери тип и длительность сценария:\n\n"
+        "🎙 **Голосовое** — 45-120 сек, с таймкодами и интонациями\n"
         "⭕ **Кружок** — 20-40 сек, с визуальными подсказками",
-        reply_markup=get_script_type_keyboard(),
+        reply_markup=get_script_type_keyboard(post_id=None),
         parse_mode="Markdown"
     )
 
@@ -3561,6 +3586,8 @@ def register_handlers(dp: Dispatcher):
 
     # ТЗ из поста (регистрируем ДО общего post_)
     dp.callback_query.register(callback_post_brief, F.data == "post_brief")
+    # Новые обработчики из post_actions
+    dp.callback_query.register(callback_design_type, F.data.startswith("design_"))
     dp.callback_query.register(callback_brief_format, F.data.startswith("brief_format_"))
     dp.callback_query.register(callback_post_brief_approve, F.data == "post_brief_approve")
     dp.callback_query.register(callback_post_brief_edit, F.data == "post_brief_edit")
@@ -3571,6 +3598,8 @@ def register_handlers(dp: Dispatcher):
 
     # Сценарий из поста (регистрируем ДО общего post_)
     dp.callback_query.register(callback_post_to_script, F.data == "post_to_script")
+    # Новые обработчики из post_actions для сценариев
+    dp.callback_query.register(callback_script_type_new, F.data.startswith("script_"))
     dp.callback_query.register(callback_script_type, F.data.startswith("script_type_"))
     dp.callback_query.register(callback_script_regen, F.data == "script_regen")
     dp.callback_query.register(callback_script_copy, F.data == "script_copy")
@@ -3621,3 +3650,204 @@ def register_handlers(dp: Dispatcher):
     dp.message.register(process_post_digest, ContentStates.waiting_for_post_digest_topic)
     dp.message.register(process_circle_topic, ContentStates.waiting_for_circle_topic)
     dp.message.register(process_post_edit, ContentStates.waiting_for_post_edit)
+
+# =============================================================================
+# НОВЫЕ ОБРАБОТЧИКИ ИЗ POST_ACTIONS.PY
+# =============================================================================
+
+async def callback_design_type(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора типа дизайна через post_actions клавиатуру"""
+    data_str = callback.data
+    
+    # Обработка отмены
+    if data_str.endswith("design_cancel"):
+        data = await state.get_data()
+        post = data.get("generated_post", "")
+        preview = post[:3500] + "..." if len(post) > 3500 else post
+        await callback.message.edit_text(
+            f"📝 Пост:\n\n{preview}",
+            reply_markup=get_post_edit_keyboard()
+        )
+        await callback.answer()
+        return
+    
+    # Разбор формата: design_banner, design_slider, etc.
+    if "design_banner" in data_str:
+        format_type = "banner"
+        brief_mode = "compact"
+    elif "design_slider" in data_str:
+        format_type = "slider"
+        brief_mode = "compact"
+    elif "design_gallery" in data_str:
+        format_type = "gallery"
+        brief_mode = "compact"
+    elif "design_carousel" in data_str:
+        format_type = "carousel"
+        brief_mode = "compact"
+    elif "design_compact" in data_str:
+        # Компактное ТЗ для текущего формата
+        data = await state.get_data()
+        format_type = data.get("brief_format", "banner")
+        brief_mode = "compact"
+    elif "design_detailed" in data_str:
+        # Подробное ТЗ для текущего формата
+        data = await state.get_data()
+        format_type = data.get("brief_format", "banner")
+        brief_mode = "detailed"
+    else:
+        await callback.answer("Неизвестный формат")
+        return
+    
+    data = await state.get_data()
+    post = data.get("generated_post", "")
+    client_slug = data.get("current_client")
+    
+    if not post:
+        await callback.answer("Пост не найден")
+        return
+    
+    format_names = {
+        "banner": "баннер",
+        "slider": "ГИФ-слайдер",
+        "gallery": "галерею",
+        "carousel": "карусель"
+    }
+    
+    mode_names = {
+        "compact": "КОРОТКОЕ",
+        "detailed": "ПОДРОБНОЕ"
+    }
+    
+    await callback.message.edit_text(
+        f"⏳ Генерирую {mode_names[brief_mode]} ТЗ на {format_names.get(format_type, 'креатив')}..."
+    )
+    await callback.answer()
+    
+    try:
+        emoji_section = get_emoji_prompt_section(client_slug)
+        
+        # Используем generate_design_for_post из post_actions
+        brief = await generate_design_for_post(
+            post_text=post,
+            design_type=format_type,
+            brief_mode=brief_mode,
+            client_context=emoji_section
+        )
+        
+        # Сохраняем ТЗ и формат в state
+        await state.update_data(
+            post_brief=brief,
+            brief_format=format_type,
+            brief_is_compact=(brief_mode == "compact")
+        )
+        
+        # Подсчитываем символы
+        char_count = len(brief)
+        mode_display = "Короткое" if brief_mode == "compact" else "Подробное"
+        status = "✅" if (brief_mode == "compact" and char_count <= 1200) else ""
+        
+        preview = brief[:3500] + "..." if len(brief) > 3500 else brief
+        await callback.message.answer(
+            f"🎨 {mode_display} ТЗ ({char_count} симв.) {status}\n\n{preview}",
+            reply_markup=get_post_brief_keyboard(is_compact=(brief_mode == "compact"))
+        )
+        
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка генерации: {e}")
+        await callback.message.answer(
+            "Вернуться к посту:",
+            reply_markup=get_post_edit_keyboard()
+        )
+
+
+
+async def callback_script_type_new(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора типа сценария через post_actions клавиатуру"""
+    data_str = callback.data
+    
+    # Обработка отмены
+    if data_str.endswith("script_cancel"):
+        data = await state.get_data()
+        post = data.get("generated_post", "")
+        preview = post[:3500] + "..." if len(post) > 3500 else post
+        await callback.message.edit_text(
+            f"📝 Пост:\n\n{preview}",
+            reply_markup=get_post_edit_keyboard()
+        )
+        await callback.answer()
+        return
+    
+    # Разбор формата: script_voice_short, script_circle_medium, etc.
+    if "script_voice" in data_str:
+        script_type = "voice"
+        if "short" in data_str:
+            duration = "short"  # 45-60
+        elif "long" in data_str:
+            duration = "long"   # 90-120
+        else:
+            duration = "medium" # 60-90
+    elif "script_circle" in data_str:
+        script_type = "circle"
+        if "medium" in data_str:
+            duration = "medium" # 30-40
+        else:
+            duration = "short"  # 20-30
+    else:
+        await callback.answer("Неизвестный формат сценария")
+        return
+    
+    data = await state.get_data()
+    post = data.get("generated_post", "")
+    client_slug = data.get("current_client")
+    
+    if not post:
+        await callback.answer("Пост не найден")
+        return
+    
+    duration_names = {
+        ("voice", "short"): "45-60 сек",
+        ("voice", "medium"): "60-90 сек",
+        ("voice", "long"): "90-120 сек",
+        ("circle", "short"): "20-30 сек",
+        ("circle", "medium"): "30-40 сек"
+    }
+    
+    type_emoji = "🎙" if script_type == "voice" else "⭕"
+    duration_text = duration_names.get((script_type, duration), "средней длительности")
+    
+    await callback.message.edit_text(
+        f"⏳ Генерирую {type_emoji} сценарий ({duration_text})..."
+    )
+    await callback.answer()
+    
+    try:
+        context = get_client_prompt(client_slug) if client_slug else ""
+        
+        # Используем generate_script_for_post из post_actions
+        script = await generate_script_for_post(
+            post_text=post,
+            script_type=script_type,
+            duration=duration,
+            client_context=context
+        )
+        
+        # Сохраняем сценарий
+        await state.update_data(
+            generated_script=script,
+            script_type=script_type,
+            script_duration=duration
+        )
+        
+        preview = script[:3500] + "..." if len(script) > 3500 else script
+        await callback.message.answer(
+            f"{type_emoji} Сценарий готов ({duration_text}):\n\n{preview}",
+            reply_markup=get_script_result_keyboard()
+        )
+        
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка генерации: {e}")
+        await callback.message.answer(
+            "Вернуться к посту:",
+            reply_markup=get_post_edit_keyboard()
+        )
+

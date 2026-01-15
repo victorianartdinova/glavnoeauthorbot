@@ -17,6 +17,7 @@ from utils.claude_api import generate_content
 class MemeStates(StatesGroup):
     """Состояния для мемов"""
     waiting_for_reference_choice = State()  # Выбор референса
+    waiting_for_custom_meme = State()  # Ожидание произвольного запроса
 
 
 def get_references_keyboard(count: int) -> InlineKeyboardMarkup:
@@ -32,7 +33,10 @@ def get_references_keyboard(count: int) -> InlineKeyboardMarkup:
         ])
 
     buttons.append([
-        InlineKeyboardButton(text="🔄 Другие референсы", callback_data="meme_refresh"),
+        InlineKeyboardButton(text="🔄 Другие", callback_data="meme_refresh"),
+        InlineKeyboardButton(text="✏️ Свой запрос", callback_data="meme_custom")
+    ])
+    buttons.append([
         InlineKeyboardButton(text="❌ Отмена", callback_data="meme_cancel")
     ])
 
@@ -229,6 +233,96 @@ async def callback_meme_refresh(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+async def callback_meme_custom(callback: CallbackQuery, state: FSMContext):
+    """Свой запрос для мема"""
+    await callback.message.edit_text(
+        "✏️ *Напиши свой запрос для мема*\n\n"
+        "Примеры:\n"
+        "• Мем про ипотеку и боль выбора\n"
+        "• Когда риелтор показывает 20 квартир\n"
+        "• Ожидание vs реальность при покупке квартиры",
+        parse_mode="Markdown"
+    )
+    await state.set_state(MemeStates.waiting_for_custom_meme)
+    await callback.answer()
+
+
+async def handle_custom_meme_request(message: types.Message, state: FSMContext):
+    """Обработка произвольного запроса для мема"""
+    data = await state.get_data()
+    client = data.get("current_client")
+
+    if not client:
+        await message.answer("⚠️ Сначала выбери клиента")
+        await state.set_state(None)
+        return
+
+    custom_request = message.text.strip()
+
+    await message.answer("⏳ Генерирую мем по твоему запросу...")
+
+    # Загружаем контекст клиента
+    client_context = load_client_context(client)
+
+    system_prompt = f"""Ты — креативный SMM-специалист агентства недвижимости.
+Твоя задача — создать мем на заданную тему для канала о недвижимости.
+
+КОНТЕКСТ КЛИЕНТА:
+{get_client_prompt(client)}
+
+ЦЕЛЕВАЯ АУДИТОРИЯ:
+- Покупатели недвижимости премиум-сегмента (от 25 млн ₽)
+- Москва и МО
+- Понимают юмор, ценят самоиронию
+- Устали от типичной рекламы
+
+СТИЛЬ:
+- Ироничный, но не токсичный
+- Связь с болями ЦА (выбор, ипотека, ожидание/реальность)
+- Короткий текст (до 200 символов)
+- Без прямой рекламы — это именно мем"""
+
+    user_prompt = f"""ЗАПРОС НА МЕМ:
+{custom_request}
+
+---
+
+Создай мем для канала о недвижимости.
+
+ФОРМАТ ОТВЕТА:
+
+МЕМНЫЙ ПОСТ
+[Текст поста для канала — до 200 символов, ироничный, связан с недвижимостью]
+
+---
+
+ТЗ ДИЗАЙНЕРУ
+
+ИДЕЯ: [описание концепции мема в 1-2 предложения]
+ТЕКСТ НА КАРТИНКЕ: [короткий текст для визуала, если нужен]
+ВИЗУАЛ: [что изобразить, какой стиль — мем-шаблон, фото, иллюстрация]"""
+
+    try:
+        meme_content = generate_content(system_prompt, user_prompt)
+
+        # Сохраняем сгенерированный мем
+        await state.update_data(
+            generated_meme=meme_content,
+            meme_reference={"custom_request": custom_request}
+        )
+
+        await message.answer(
+            f"😂 *Мем готов!*\n\n{meme_content}",
+            parse_mode="Markdown",
+            reply_markup=get_meme_save_keyboard()
+        )
+
+    except Exception as e:
+        await message.answer(f"❌ Ошибка генерации: {str(e)}")
+
+    await state.set_state(None)
+
+
 async def callback_meme_cancel(callback: CallbackQuery, state: FSMContext):
     """Отмена генерации мема"""
     await state.set_state(None)
@@ -240,6 +334,12 @@ def register_handlers(dp: Dispatcher):
     """Регистрация хендлеров мемов"""
     # Команда /meme
     dp.message.register(cmd_meme, Command("meme"))
+
+    # Обработка произвольного запроса
+    dp.message.register(
+        handle_custom_meme_request,
+        MemeStates.waiting_for_custom_meme
+    )
 
     # Callbacks
     dp.callback_query.register(
@@ -253,6 +353,10 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         callback_meme_refresh,
         F.data == "meme_refresh"
+    )
+    dp.callback_query.register(
+        callback_meme_custom,
+        F.data == "meme_custom"
     )
     dp.callback_query.register(
         callback_meme_cancel,

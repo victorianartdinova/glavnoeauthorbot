@@ -4,7 +4,9 @@
 import aiohttp
 from bs4 import BeautifulSoup
 import re
+import json
 from typing import Optional, Dict, List
+from urllib.parse import quote_plus
 
 
 async def fetch_page(url: str, timeout: int = 10) -> Optional[str]:
@@ -297,14 +299,21 @@ async def parse_jk_website(url: str) -> dict:
     return result
 
 
-def format_parsed_data(data: dict) -> str:
-    """Форматировать распаршенные данные для промпта Claude"""
+def format_parsed_data(data: dict, include_name: bool = False) -> str:
+    """
+    Форматировать распаршенные данные для промпта Claude.
+
+    Args:
+        data: распаршенные данные
+        include_name: включать ли название ЖК (по умолчанию НЕТ — для постов)
+    """
     if not data["parse_success"]:
         return f"Ошибка парсинга: {data['error']}"
 
     lines = []
 
-    if data["name"]:
+    # Название ЖК — только если явно запрошено (например, для внутренних целей)
+    if include_name and data["name"]:
         lines.append(f"НАЗВАНИЕ: {data['name']}")
 
     if data["prices"]:
@@ -328,8 +337,46 @@ def format_parsed_data(data: dict) -> str:
     if data["features"]:
         lines.append(f"ОСОБЕННОСТИ: {', '.join(data['features'])}")
 
-    # Добавляем сырой текст для дополнительного контекста
-    if data["raw_text"]:
-        lines.append(f"\nДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ С САЙТА:\n{data['raw_text'][:3000]}")
+    # Сырой текст НЕ добавляем — там может быть название ЖК
+    # Все полезные данные уже извлечены парсером выше
 
     return "\n".join(lines)
+
+
+async def search_jk_info(query: str) -> Optional[str]:
+    """
+    Поиск информации о ЖК через Яндекс.
+    Возвращает краткую информацию или None.
+    """
+    search_url = f"https://yandex.ru/search/?text={quote_plus(query + ' ЖК Москва цена метро')}"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status != 200:
+                    return None
+                html = await response.text()
+
+        soup = BeautifulSoup(html, "lxml")
+        results = []
+
+        # Парсим сниппеты Яндекса
+        for snippet in soup.select(".OrganicTextContentSpan, .ExtendedText-Content, .Organic-ContentWrapper"):
+            text = snippet.get_text(strip=True)
+            if text and len(text) > 30:
+                results.append(text[:300])
+                if len(results) >= 2:
+                    break
+
+        if results:
+            return "ИНФОРМАЦИЯ ИЗ ПОИСКА:\n" + "\n".join(results)
+        return None
+
+    except Exception:
+        return None

@@ -1,6 +1,6 @@
 # Правила разработки
 
-*Обновлено: 2026-01-14*
+*Обновлено: 2026-01-15*
 
 ## Журнал контента (Journal)
 
@@ -116,6 +116,49 @@ update_entry(client, entry_id, {
 
 ## Тестирование
 
+### Правило 8: Smoke-test перед коммитом
+
+**Перед каждым коммитом ОБЯЗАТЕЛЬНО запускать smoke-tests:**
+
+```bash
+venv/bin/python -m pytest tests/test_smoke.py -v
+```
+
+Smoke-tests проверяют:
+- ✅ Импорт bot.py без ошибок
+- ✅ Импорт всех хендлеров
+- ✅ Импорт всех утилит
+- ✅ Существование директорий данных
+
+Если smoke-tests падают — **коммит блокируется**.
+
+### Правило 9: Защита от битых JSON
+
+**Все операции чтения/записи JSON должны быть защищены:**
+
+```python
+# ✅ Правильно
+try:
+    with open(path, 'r') as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    data = get_default_data()
+    # Опционально: бэкап битого файла
+    if os.path.exists(path):
+        shutil.copy(path, f"{path}.broken")
+```
+
+Бот НЕ должен падать из-за битых данных.
+
+### Правило 10: Не ломать запуск
+
+**Запуск бота — критически важная операция.**
+
+Перед push проверь:
+1. `venv/bin/python bot.py` — запускается без ошибок
+2. `/start` в Telegram — возвращает клавиатуру
+3. Выбор клиента — показывает меню действий
+
 ### Журнал (tests/test_journal_dates.py)
 - `test_entry_date_equals_selected_date_not_now` — дата = selected_date
 - `test_planned_topics_does_not_increase_published_count` — план не считается опубликованным
@@ -126,3 +169,9 @@ update_entry(client, entry_id, {
 - `test_validate_post_with_banned_phrase` — запрещённые фразы детектятся
 - `test_fix_post_issues` — автоисправление работает
 - `test_style_prompt_section` — секция промпта генерируется
+
+### Smoke (tests/test_smoke.py)
+- `test_import_bot` — импорт bot.py
+- `test_import_all_handlers` — импорт хендлеров
+- `test_import_utils` — импорт утилит
+- `test_data_directories_exist` — директории данных

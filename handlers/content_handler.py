@@ -71,6 +71,7 @@ class ContentStates(StatesGroup):
     # Состояния для контент-плана
     waiting_for_plan_info = State()  # НОВОЕ: сбор базовой информации
     waiting_for_plan_lots = State()
+    waiting_for_plan_manual_themes = State()  # Ручной ввод тем вместо лотов
     waiting_for_plan_live = State()
     waiting_for_plan_requests = State()
     # Состояния для ТЗ из контент-плана
@@ -117,7 +118,7 @@ def get_post_edit_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=edit_buttons + action_buttons + final_buttons)
 
 
-def get_plan_skip_keyboard(show_clear: bool = False) -> InlineKeyboardMarkup:
+def get_plan_skip_keyboard(show_clear: bool = False, show_manual: bool = False) -> InlineKeyboardMarkup:
     """Клавиатура для пропуска шага"""
     buttons = [
         [InlineKeyboardButton(text="⏭ Пропустить", callback_data="plan_skip")],
@@ -125,6 +126,8 @@ def get_plan_skip_keyboard(show_clear: bool = False) -> InlineKeyboardMarkup:
     ]
     if show_clear:
         buttons.append([InlineKeyboardButton(text="🗑 Очистить лоты", callback_data="plan_clear_lots")])
+    if show_manual:
+        buttons.append([InlineKeyboardButton(text="📝 Я сам напишу темы", callback_data="plan_manual_themes")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -399,7 +402,7 @@ async def process_plan_lots(message: types.Message, state: FSMContext):
     await message.answer(
         f"{response}\n\n"
         "Отправь ещё или нажми кнопку.",
-        reply_markup=get_plan_skip_keyboard(show_clear=len(lots) > 0)
+        reply_markup=get_plan_skip_keyboard(show_clear=len(lots) > 0, show_manual=len(lots) > 0)
     )
 
 
@@ -452,6 +455,80 @@ async def process_plan_live(message: types.Message, state: FSMContext):
     )
 
 
+async def callback_plan_manual_themes(callback: CallbackQuery, state: FSMContext):
+    """Переход к ручному вводу тем"""
+    await callback.answer()
+    await callback.message.edit_text(
+        "📝 *РУЧНОЙ ВВОД ТЕМ*\n\n"
+        "Напиши темы для постов (одна в строке):\n"
+        "• Можно с нумерацией: 1. Тема первая\n"
+        "• Можно без: просто текст\n"
+        "• Одна тема = один пост\n\n"
+        "Когда закончишь — нажми кнопку.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Пропустить", callback_data="plan_skip_themes")],
+            [InlineKeyboardButton(text="✅ Готово, генерировать", callback_data="plan_themes_done")]
+        ])
+    )
+    await state.set_state(ContentStates.waiting_for_plan_manual_themes)
+    await state.update_data(plan_manual_themes=[])
+
+
+async def process_plan_manual_themes(message: types.Message, state: FSMContext):
+    """Сбор ручных тем"""
+    data = await state.get_data()
+    themes = data.get("plan_manual_themes", [])
+
+    # Парсим текст как ручные темы (поддерживаем нумерацию)
+    new_themes = split_lots_from_message(message.text)  # Переиспользуем функцию для парсинга
+    themes.extend(new_themes)
+
+    await state.update_data(plan_manual_themes=themes)
+
+    themes_list = "\n".join([f"• {t[:50]}" for t in themes])
+    await message.answer(
+        f"✅ Добавлено {len(new_themes)} тем (всего: {len(themes)})\n\n{themes_list}\n\n"
+        "Отправь ещё или нажми кнопку.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Пропустить", callback_data="plan_skip_themes")],
+            [InlineKeyboardButton(text="✅ Готово, генерировать", callback_data="plan_themes_done")]
+        ])
+    )
+
+
+async def callback_plan_skip_themes(callback: CallbackQuery, state: FSMContext):
+    """Пропуск ручных тем и переход к живому контенту"""
+    await callback.answer()
+    await callback.message.edit_text(
+        "Шаг 2/3: *ЖИВОЙ КОНТЕНТ*\n\n"
+        "Что есть для публикации?\n"
+        "• Ссылки на Instagram/Reels\n"
+        "• Темы для кружков\n"
+        "• Идеи для историй\n\n"
+        "Можно несколько сообщений.",
+        parse_mode="Markdown",
+        reply_markup=get_plan_skip_keyboard()
+    )
+    await state.set_state(ContentStates.waiting_for_plan_live)
+
+
+async def callback_plan_themes_done(callback: CallbackQuery, state: FSMContext):
+    """Готово с ручными темами — переход к живому контенту"""
+    await callback.answer()
+    await callback.message.edit_text(
+        "Шаг 2/3: *ЖИВОЙ КОНТЕНТ*\n\n"
+        "Что еще есть для публикации?\n"
+        "• Ссылки на Instagram/Reels\n"
+        "• Темы для кружков\n"
+        "• Идеи для историй\n\n"
+        "Можно несколько сообщений или пропустить.",
+        parse_mode="Markdown",
+        reply_markup=get_plan_skip_keyboard()
+    )
+    await state.set_state(ContentStates.waiting_for_plan_live)
+
+
 async def process_plan_skip_live(callback: CallbackQuery, state: FSMContext):
     """Переход к просьбам клиента"""
     await callback.answer()
@@ -491,6 +568,7 @@ async def process_plan_generate(callback: CallbackQuery, state: FSMContext):
     lots = data.get("plan_lots", [])
     live = data.get("plan_live", [])
     requests = data.get("plan_requests", [])
+    manual_themes = data.get("plan_manual_themes", [])
     period = data.get("plan_period", 7)
     posts_per_day = data.get("plan_posts_per_day", 1)
     events = data.get("plan_events", "")
@@ -499,7 +577,8 @@ async def process_plan_generate(callback: CallbackQuery, state: FSMContext):
 
     plan_id = await generate_content_plan_with_data(
         callback.message, client, lots, live, requests,
-        period=period, posts_per_day=posts_per_day, events=events
+        period=period, posts_per_day=posts_per_day, events=events,
+        manual_themes=manual_themes
     )
 
     # Сохраняем plan_id в state для работы с днями
@@ -544,9 +623,12 @@ async def generate_content_plan_with_data(
     requests: list,
     period: int = 7,
     posts_per_day: int = 1,
-    events: str = ""
+    events: str = "",
+    manual_themes: list = None
 ) -> str:
     """Генерация контент-плана на основе собранных данных. Возвращает plan_id."""
+    if manual_themes is None:
+        manual_themes = []
 
     try:
         # Загружаем контекст клиента
@@ -604,6 +686,14 @@ async def generate_content_plan_with_data(
         if events:
             events_info = f"\nВАЖНЫЕ ДАТЫ/СОБЫТИЯ:\n{events}\n"
 
+        # Ручные темы
+        themes_info = ""
+        if manual_themes:
+            themes_info = "\nРУЧНЫЕ ТЕМЫ ПОЛЬЗОВАТЕЛЯ (ПРИОРИТЕТ!!!):\n"
+            for i, theme in enumerate(manual_themes, 1):
+                themes_info += f"{i}. {theme}\n"
+            themes_info += "\n⚠️ ОБЯЗАТЕЛЬНО включи эти темы в план в указанном порядке.\n"
+
         # Системный промпт
         system_prompt = f"""Ты — контент-стратег для агентства недвижимости премиум-сегмента.
 
@@ -631,7 +721,7 @@ async def generate_content_plan_with_data(
 2. На выходные (Сб-Вс): дайджест или живой контент
 3. Кружки — 2-3 раза в неделю
 4. Для каждого кружка указывай тему и 2-3 тезиса
-5. ПРИОРИТЕТ просьбам клиента — они важнее всего
+5. ПРИОРИТЕТ ручным темам пользователя — включи их все в план
 6. Если указаны события/даты — обязательно учитывай их в плане
 7. ОБЯЗАТЕЛЬНО указывай пометку 📢ADS или 📱КАНАЛ для каждого лидген-поста
 
@@ -645,6 +735,7 @@ async def generate_content_plan_with_data(
         user_prompt = f"""Создай контент-план на {period} дней начиная с {today.strftime('%d.%m.%Y')} ({weekday_names[today.weekday()]}).
 Постов в день: {posts_per_day}
 
+{themes_info}
 {lots_info}
 {live_info}
 {requests_info}
@@ -2148,7 +2239,20 @@ async def process_post_lot(message: types.Message, state: FSMContext):
 - Укажи расчётную доходность если есть данные
 - Используй термины: резиденты, арендаторы, порог входа, пассивный доход
 - Локация с акцентом на деловую инфраструктуру (БЦ, ТЦ, МЦК)
-- CTA с акцентом на условия/бронь"""
+- CTA с акцентом на условия/бронь
+
+ЗАПРЕЩЁННО КАТЕГОРИЧЕСКИ (КЛИШЕ):
+❌ "История встречается с будущим"
+❌ "Пространство, созданное для вас"
+❌ Философские размышления без цифр
+❌ "Премиум-класс" без конкретики
+
+ОБЯЗАТЕЛЬНО:
+✅ Точный % доходности (не "хорошая доходность")
+✅ Точный размер инвестиций и схема платежа
+✅ Конкретная локация (БЦ у какого метро, какие компании рядом)
+✅ Реальные факты (спрос арендаторов, потенциал района)
+СТИЛЬ: Профессиональный, как инвестиционный консультант, только цифры и факты."""
             else:
                 lot_type = "ЛИДГЕН-КАРТОЧКУ для Telegram-канала"
                 rules = """ПРАВИЛА:
@@ -2156,7 +2260,24 @@ async def process_post_lot(message: types.Message, state: FSMContext):
 - ЗАПРЕЩЕНО указывать название ЖК, девелопера, застройщика — используй "Жилой комплекс", "Проект", "Комплекс у парка"
 - Короткие абзацы (1-2 строки)
 - Конкретные цифры
-- CTA с тематическим ключевым словом"""
+- CTA с тематическим ключевым словом
+
+ЗАПРЕЩЁННО КАТЕГОРИЧЕСКИ (КЛИШЕ):
+❌ "Представьте..." (перегруженные лирические вступления)
+❌ "История встречается с будущим"
+❌ "Пространство, созданное для вас"
+❌ "Вот такую штуку..." (типичное клише)
+❌ "Красивая/комфортная жизнь" без примеров
+❌ "Идеально подойдёт для" (нужны КОНКРЕТНЫЕ причины!)
+❌ Размывание первого взноса ("от X") без точной суммы
+
+ПРИМЕРЫ ПРАВИЛЬНОГО КОНТЕНТА:
+✅ Вместо "Терраса с видом на речные панорамы" → конкретно: "Терраса 40м² с видом на Москву-реку"
+✅ Вместо "Выгодные условия" → конкретно: "Платёж 89 тыс./мес, первый взнос 2,5 млн, ключи в день покупки"
+✅ Вместо "Близко к метро" → конкретно: "7 мин пешком до метро" или "100м от Третьего кольца"
+✅ Вместо философии → факты: "Подземный паркинг, фитнес, детский сад"
+
+СТИЛЬ: Острый, практичный. Как опытный брокер рассказывает коллеге о квартире, не красивые слова."""
 
             # Получаем требования к стилю клиента
             style_section = get_style_prompt_section(client_slug)
@@ -3621,7 +3742,10 @@ def register_handlers(dp: Dispatcher):
 
     # Callback для контент-плана: сбор данных
     dp.callback_query.register(process_plan_clear_lots, F.data == "plan_clear_lots", ContentStates.waiting_for_plan_lots)
+    dp.callback_query.register(callback_plan_manual_themes, F.data == "plan_manual_themes", ContentStates.waiting_for_plan_lots)
     dp.callback_query.register(process_plan_skip_lots, F.data == "plan_skip", ContentStates.waiting_for_plan_lots)
+    dp.callback_query.register(callback_plan_skip_themes, F.data == "plan_skip_themes", ContentStates.waiting_for_plan_manual_themes)
+    dp.callback_query.register(callback_plan_themes_done, F.data == "plan_themes_done", ContentStates.waiting_for_plan_manual_themes)
     dp.callback_query.register(process_plan_skip_live, F.data == "plan_skip", ContentStates.waiting_for_plan_live)
     dp.callback_query.register(process_plan_generate, F.data == "plan_skip", ContentStates.waiting_for_plan_requests)
     dp.callback_query.register(process_plan_generate, F.data == "plan_generate")
@@ -3640,6 +3764,7 @@ def register_handlers(dp: Dispatcher):
     # FSM обработчики
     dp.message.register(process_plan_events_text, ContentStates.waiting_for_plan_info)
     dp.message.register(process_plan_lots, ContentStates.waiting_for_plan_lots)
+    dp.message.register(process_plan_manual_themes, ContentStates.waiting_for_plan_manual_themes)
     dp.message.register(process_plan_live, ContentStates.waiting_for_plan_live)
     dp.message.register(process_plan_requests, ContentStates.waiting_for_plan_requests)
     dp.message.register(process_brief_data, ContentStates.waiting_for_brief_data)
@@ -3725,9 +3850,9 @@ async def callback_design_type(callback: CallbackQuery, state: FSMContext):
     
     try:
         emoji_section = get_emoji_prompt_section(client_slug)
-        
+
         # Используем generate_design_for_post из post_actions
-        brief = await generate_design_for_post(
+        brief = generate_design_for_post(
             post_text=post,
             design_type=format_type,
             brief_mode=brief_mode,

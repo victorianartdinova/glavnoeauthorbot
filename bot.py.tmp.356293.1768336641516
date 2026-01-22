@@ -3,6 +3,13 @@ Glavnoe Bot - Telegram бот для агентства лидгена в нед
 """
 import asyncio
 import logging
+import socket
+
+# Принудительно используем IPv4 (IPv6 блокирован на сервере)
+_orig_getaddrinfo = socket.getaddrinfo
+def _getaddrinfo_ipv4_only(host, port, family=0, type=0, proto=0, flags=0):
+    return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+socket.getaddrinfo = _getaddrinfo_ipv4_only
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -10,21 +17,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
-# Новая конфигурация с защитой от смешивания env
-from config import (
-    validate_bot_identity,
-    EXPECTED_PRODUCT_NAME,
-    TEAM_CHAT_ID,
-    CLIENT_THREADS,
-    OPERATOR_USERNAME,
-    ADMIN_USER_ID,
-    ENABLE_LOT_CARD,
-    ENABLE_PACKAGE_BY_LOT,
-    ENABLE_BRIEF_SHORT,
-    ENABLE_PLAN_EXPORT,
-)
-
-from handlers import lot_handler, content_handler, metrics_handler, client_handler, plan_handler, journal_handler, meme_handler, focus_handler, voice_handler, dev_handler, leadgen_cards_handler, package_lot_handler, retro_handler
+import config
+from handlers import lot_handler, content_handler, metrics_handler, client_handler, plan_handler, journal_handler, meme_handler, focus_handler, voice_handler, dev_handler, leadgen_cards_handler
 
 
 def get_clients_keyboard() -> ReplyKeyboardMarkup:
@@ -77,8 +71,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Глобальные переменные (будут инициализированы в main)
-bot: Bot = None
+# Инициализация бота
+bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
@@ -89,7 +83,7 @@ dp = Dispatcher(storage=storage)
 async def cmd_start(message: types.Message):
     """Приветствие — выбор клиента"""
     await message.answer(
-        f"🏢 *{EXPECTED_PRODUCT_NAME}*\n\n"
+        "🏢 *GLAVNOE Bot*\n\n"
         "Контент и реклама для недвижимости\n\n"
         "👇 Выбери клиента:",
         parse_mode="Markdown",
@@ -255,53 +249,15 @@ meme_handler.register_handlers(dp)
 focus_handler.register_handlers(dp)
 voice_handler.register_handlers(dp)
 dev_handler.register_handlers(dp)
+leadgen_cards_handler.register_handlers(dp)
 metrics_handler.register_handlers(dp)
-package_lot_handler.register_handlers(dp)
-retro_handler.register_handlers(dp)
 
 
 # === Запуск ===
 async def main():
-    global bot
-
-    logger.info(f"🚀 Запуск {EXPECTED_PRODUCT_NAME}...")
-
-    # КРИТИЧЕСКАЯ ПРОВЕРКА: валидация идентичности ПЕРЕД запуском
-    try:
-        bot = await validate_bot_identity()
-        logger.info("✅ Идентичность бота подтверждена")
-    except ValueError as e:
-        logger.error(f"❌ Ошибка валидации идентичности:\n{e}")
-        return
-    except Exception as e:
-        logger.error(f"❌ Неожиданная ошибка при валидации: {e}")
-        return
-
-    # Инициализируем и запускаем планировщик для анализа победителей
-    try:
-        from utils.scheduler import init_scheduler, start_scheduler
-        import asyncio
-
-        event_loop = asyncio.get_event_loop()
-        init_scheduler(event_loop=event_loop)
-        await start_scheduler()
-        logger.info("✅ Планировщик запущен")
-    except ImportError:
-        logger.warning("⚠️ APScheduler не установлен. Автоанализ отключен.")
-    except Exception as e:
-        logger.error(f"⚠️ Ошибка инициализации планировщика: {e}")
-
-    # Запуск polling
-    try:
-        logger.info("🔄 Запуск polling...")
-        await dp.start_polling(bot, skip_updates=True)
-    finally:
-        if bot and bot.session:
-            await bot.session.close()
+    logger.info("🚀 Запуск Glavnoe Bot...")
+    await dp.start_polling(bot, skip_updates=True)
 
 
 if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("👋 Остановка бота...")
+    asyncio.run(main())

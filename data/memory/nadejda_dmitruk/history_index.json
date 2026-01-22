@@ -1,0 +1,205 @@
+{
+  "last_updated": "2026-01-15T16:28:05.878275",
+  "period_days": 30,
+  "entries": [
+    {
+      "id": "entry_1",
+      "date": "2026-01-12",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "ипотека",
+      "cta": "РАСЧЁТ",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "ипотека",
+        "инвестиция",
+        "локация",
+        "квартира",
+        "видовой",
+        "готовность"
+      ]
+    },
+    {
+      "id": "2",
+      "date": "2026-01-14",
+      "format": "lidgen",
+      "hook_type": "location",
+      "angle": "unknown",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "локация"
+      ]
+    },
+    {
+      "id": "3",
+      "date": "2026-01-12",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "ипотека",
+      "cta": "РИМСКАЯ",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "ипотека",
+        "локация",
+        "премиум",
+        "скидка",
+        "квартира",
+        "готовность"
+      ]
+    },
+    {
+      "id": "4",
+      "date": "2026-01-12",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "ипотека",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "ипотека",
+        "локация",
+        "квартира",
+        "видовой"
+      ]
+    },
+    {
+      "id": "53",
+      "date": "2026-01-16",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "рассрочка 0%",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "локация",
+        "видовой"
+      ]
+    },
+    {
+      "id": "54",
+      "date": "2026-01-16",
+      "format": "expert",
+      "hook_type": "financial",
+      "angle": "рассрочка",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "инвестиция",
+        "квартира"
+      ]
+    },
+    {
+      "id": "55",
+      "date": "2026-01-16",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "unknown",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "локация",
+        "квартира"
+      ]
+    },
+    {
+      "id": "56",
+      "date": "2026-01-17",
+      "format": "digest",
+      "hook_type": "financial",
+      "angle": "ипотека",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "ипотека",
+        "инвестиция",
+        "локация",
+        "премиум",
+        "квартира"
+      ]
+    },
+    {
+      "id": "58",
+      "date": "2026-01-16",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "скидка",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "локация",
+        "скидка",
+        "квартира",
+        "готовность"
+      ]
+    },
+    {
+      "id": "59",
+      "date": "2026-01-19",
+      "format": "lidgen_carousel",
+      "hook_type": "financial",
+      "angle": "ипотека",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "ипотека",
+        "локация",
+        "премиум",
+        "квартира",
+        "готовность"
+      ]
+    },
+    {
+      "id": "60",
+      "date": "2026-01-19",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "рассрочка",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "ипотека",
+        "локация",
+        "скидка",
+        "готовность"
+      ]
+    }
+  ],
+  "stats": {
+    "formats": {
+      "lidgen": 8,
+      "expert": 1,
+      "digest": 1,
+      "lidgen_carousel": 1
+    },
+    "hooks": {
+      "financial": 10,
+      "location": 1
+    },
+    "ctas": {
+      "РАСЧЁТ": 1,
+      "РИМСКАЯ": 1
+    },
+    "angles": {
+      "ипотека": 5,
+      "unknown": 2,
+      "рассрочка 0%": 1,
+      "рассрочка": 2,
+      "скидка": 1
+    }
+  }
+}

@@ -1,0 +1,284 @@
+{
+  "last_updated": "2026-01-22T06:43:18.754319",
+  "period_days": 30,
+  "entries": [
+    {
+      "id": "entry_9b188c96",
+      "date": "2026-01-12",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "рассрочка 0%",
+      "cta": "ВОКСХОЛЛ",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "инвестиция",
+        "локация",
+        "офис",
+        "видовой"
+      ]
+    },
+    {
+      "id": "entry_7e7adb00",
+      "date": "2026-01-13",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "локация центр",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "локация",
+        "премиум",
+        "квартира",
+        "видовой"
+      ]
+    },
+    {
+      "id": "entry_87a05a39",
+      "date": "2026-01-13",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "инвестиция",
+      "cta": "СТАРТ",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "инвестиция",
+        "локация"
+      ]
+    },
+    {
+      "id": "entry_b145a1ca",
+      "date": "2026-01-13",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "минимальный взнос",
+      "cta": "СТАРТ",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "локация"
+      ]
+    },
+    {
+      "id": "13",
+      "date": "2026-01-12",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "рассрочка 0%",
+      "cta": "ВОКСХОЛЛ",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "инвестиция",
+        "локация",
+        "офис",
+        "видовой"
+      ]
+    },
+    {
+      "id": "14",
+      "date": "2026-01-13",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "локация центр",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "локация",
+        "премиум",
+        "квартира",
+        "видовой"
+      ]
+    },
+    {
+      "id": "15",
+      "date": "2026-01-13",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "инвестиция",
+      "cta": "СТАРТ",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "инвестиция",
+        "локация"
+      ]
+    },
+    {
+      "id": "16",
+      "date": "2026-01-13",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "локация центр",
+      "cta": "СТАРТ",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "локация"
+      ]
+    },
+    {
+      "id": "24",
+      "date": "2026-01-16",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "рассрочка",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "инвестиция",
+        "локация",
+        "премиум",
+        "квартира",
+        "видовой",
+        "готовность"
+      ]
+    },
+    {
+      "id": "49",
+      "date": "2026-01-16",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "рассрочка",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "инвестиция",
+        "локация",
+        "офис",
+        "готовность"
+      ]
+    },
+    {
+      "id": "50",
+      "date": "2026-01-17",
+      "format": "expert",
+      "hook_type": "financial",
+      "angle": "инвестиция",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "инвестиция",
+        "локация",
+        "офис"
+      ]
+    },
+    {
+      "id": "51",
+      "date": "2026-01-18",
+      "format": "circle",
+      "hook_type": "unknown",
+      "angle": "инвестиция",
+      "cta": "КОММЕРЦИЯ",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "инвестиция",
+        "офис"
+      ]
+    },
+    {
+      "id": "52",
+      "date": "2026-01-19",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "рассрочка 0%",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "локация",
+        "квартира",
+        "видовой",
+        "готовность"
+      ]
+    },
+    {
+      "id": "63",
+      "date": "2026-01-22",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "рассрочка",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "инвестиция",
+        "локация",
+        "офис",
+        "готовность"
+      ]
+    },
+    {
+      "id": "64",
+      "date": "2026-01-22",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "рассрочка",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "ипотека",
+        "инвестиция",
+        "локация",
+        "офис",
+        "готовность"
+      ]
+    },
+    {
+      "id": "65",
+      "date": "2026-01-22",
+      "format": "lidgen_carousel",
+      "hook_type": "financial",
+      "angle": "рассрочка",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "инвестиция",
+        "локация",
+        "офис",
+        "готовность"
+      ]
+    }
+  ],
+  "stats": {
+    "formats": {
+      "lidgen": 13,
+      "expert": 1,
+      "circle": 1,
+      "lidgen_carousel": 1
+    },
+    "hooks": {
+      "financial": 15,
+      "unknown": 1
+    },
+    "ctas": {
+      "ВОКСХОЛЛ": 2,
+      "СТАРТ": 4,
+      "КОММЕРЦИЯ": 1
+    },
+    "angles": {
+      "рассрочка 0%": 3,
+      "локация центр": 3,
+      "инвестиция": 4,
+      "минимальный взнос": 1,
+      "рассрочка": 5
+    }
+  }
+}

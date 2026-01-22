@@ -114,6 +114,19 @@ if not CLAUDE_API_KEY:
     )
 
 
+# === Search API (опционально) ===
+# Для активации полноценного поиска информации об объектах недвижимости
+# Используем SerpAPI (парсит Google/Yandex через облако, не блокируется)
+# Зарегистрируйтесь на https://serpapi.com/ чтобы получить бесплатный API ключ
+# 100 запросов/месяц бесплатно
+SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
+# Если ключ не установлен, поиск будет работать через fallback web scraping
+if SERPAPI_KEY:
+    print("ℹ️  SerpAPI configured - using SerpAPI for object search")
+else:
+    print("ℹ️  SerpAPI not configured - falling back to web scraping (may be slower)")
+
+
 # === Пути ===
 BASE_DIR = Path(__file__).parent.parent.absolute()
 DOCS_DIR = BASE_DIR / "docs"

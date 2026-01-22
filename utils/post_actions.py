@@ -101,7 +101,7 @@ def get_script_type_keyboard(post_id: Optional[str] = None) -> InlineKeyboardMar
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-async def generate_design_for_post(
+def generate_design_for_post(
     post_text: str,
     design_type: str = "banner",
     brief_mode: str = "compact",

@@ -345,9 +345,42 @@ def format_parsed_data(data: dict, include_name: bool = False) -> str:
 
 async def search_jk_info(query: str) -> Optional[str]:
     """
-    Поиск информации о ЖК через Яндекс.
-    Возвращает краткую информацию или None.
+    Поиск информации об объекте через Яндекс с приоритетом на Yandex XML API.
+    Делает несколько запросов для максимума информации (для УТП).
+    С fallback на web scraping если API недоступен.
+
+    Returns:
+        Отформатированная информация для УТП или None
     """
+    if not query or len(query.strip()) < 3:
+        return None
+
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Первый приоритет: Yandex XML API
+    try:
+        from utils.yandex_search import search_object_with_utp
+        from utils.search_cache import get_cached_search, save_to_cache
+
+        # Проверяем кеш
+        cache_key = f"search_utp:{query.lower()}"
+        cached_result = await get_cached_search(cache_key)
+        if cached_result:
+            logger.debug(f"Using cached search result for: {query}")
+            return cached_result
+
+        # Делаем поиск через API
+        result = await search_object_with_utp(query, max_queries=4)
+        if result:
+            # Сохраняем в кеш
+            await save_to_cache(cache_key, result)
+            return result
+
+    except Exception as e:
+        logger.debug(f"Yandex API search failed: {e}, falling back to web scraping")
+
+    # Fallback: старый web scraping (если API недоступен)
     search_url = f"https://yandex.ru/search/?text={quote_plus(query + ' ЖК Москва цена метро')}"
 
     headers = {
@@ -378,5 +411,6 @@ async def search_jk_info(query: str) -> Optional[str]:
             return "ИНФОРМАЦИЯ ИЗ ПОИСКА:\n" + "\n".join(results)
         return None
 
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Web scraping fallback failed: {e}")
         return None

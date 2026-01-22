@@ -1,0 +1,364 @@
+{
+  "last_updated": "2026-01-22T09:45:19.059836",
+  "period_days": 30,
+  "entries": [
+    {
+      "id": "entry_32",
+      "date": "2026-01-14",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "локация центр",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "локация",
+        "офис",
+        "апартаменты",
+        "готовность"
+      ]
+    },
+    {
+      "id": "33",
+      "date": "2026-01-12",
+      "format": "лидген",
+      "hook_type": "unknown",
+      "angle": "инвестиция",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "инвестиция",
+        "офис"
+      ]
+    },
+    {
+      "id": "34",
+      "date": "2026-01-13",
+      "format": "лидген",
+      "hook_type": "unknown",
+      "angle": "локация центр",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": []
+    },
+    {
+      "id": "35",
+      "date": "2026-01-14",
+      "format": "лидген",
+      "hook_type": "unknown",
+      "angle": "unknown",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": []
+    },
+    {
+      "id": "36",
+      "date": "2026-01-15",
+      "format": "кружок",
+      "hook_type": "unknown",
+      "angle": "unknown",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "апартаменты"
+      ]
+    },
+    {
+      "id": "37",
+      "date": "2026-01-16",
+      "format": "лидген",
+      "hook_type": "financial",
+      "angle": "рассрочка 0%",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "готовность"
+      ]
+    },
+    {
+      "id": "38",
+      "date": "2026-01-17",
+      "format": "дайджест",
+      "hook_type": "unknown",
+      "angle": "инвестиция",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "инвестиция"
+      ]
+    },
+    {
+      "id": "39",
+      "date": "2026-01-18",
+      "format": "live",
+      "hook_type": "unknown",
+      "angle": "unknown",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "видовой"
+      ]
+    },
+    {
+      "id": "40",
+      "date": "2026-01-12",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "unknown",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "апартаменты"
+      ]
+    },
+    {
+      "id": "41",
+      "date": "2026-01-13",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "рассрочка 0%",
+      "cta": "ОФИС",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "инвестиция",
+        "локация",
+        "офис",
+        "готовность"
+      ]
+    },
+    {
+      "id": "42",
+      "date": "2026-01-14",
+      "format": "lidgen",
+      "hook_type": "location",
+      "angle": "инвестиция",
+      "cta": "КРЕМЛЬ",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "инвестиция",
+        "локация",
+        "апартаменты",
+        "квартира",
+        "видовой"
+      ]
+    },
+    {
+      "id": "43",
+      "date": "2026-01-15",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "инвестиция",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "инвестиция",
+        "локация",
+        "офис",
+        "готовность"
+      ]
+    },
+    {
+      "id": "44",
+      "date": "2026-01-16",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "инвестиция",
+      "cta": "ОФИС",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "инвестиция",
+        "локация",
+        "офис",
+        "видовой"
+      ]
+    },
+    {
+      "id": "45",
+      "date": "2026-01-16",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "локация метро",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "локация",
+        "апартаменты",
+        "видовой",
+        "готовность"
+      ]
+    },
+    {
+      "id": "46",
+      "date": "2026-02-17",
+      "format": "digest",
+      "hook_type": "financial",
+      "angle": "ипотека",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "ипотека",
+        "локация",
+        "апартаменты",
+        "квартира",
+        "готовность"
+      ]
+    },
+    {
+      "id": "47",
+      "date": "2026-01-17",
+      "format": "digest",
+      "hook_type": "financial",
+      "angle": "рассрочка 0%",
+      "cta": null,
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "инвестиция",
+        "локация",
+        "премиум",
+        "офис",
+        "апартаменты",
+        "видовой",
+        "готовность"
+      ]
+    },
+    {
+      "id": "48",
+      "date": "2026-01-19",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "инвестиция",
+      "cta": "ТВЕРСКАЯ",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "инвестиция",
+        "локация",
+        "апартаменты",
+        "квартира",
+        "пентхаус",
+        "видовой",
+        "готовность"
+      ]
+    },
+    {
+      "id": "57",
+      "date": "2026-01-16",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "рассрочка 0%",
+      "cta": "ПАНОРАМА",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "рассрочка",
+        "локация",
+        "премиум",
+        "квартира",
+        "видовой"
+      ]
+    },
+    {
+      "id": "61",
+      "date": "2026-01-21",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "скидка",
+      "cta": "ПЕНТХАУС",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "локация",
+        "премиум",
+        "скидка",
+        "квартира",
+        "пентхаус",
+        "готовность"
+      ]
+    },
+    {
+      "id": "62",
+      "date": "2026-01-22",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "ипотека",
+      "cta": "НАБЕРЕЖНАЯ",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "ипотека",
+        "локация",
+        "премиум",
+        "пентхаус",
+        "видовой",
+        "готовность"
+      ]
+    },
+    {
+      "id": "66",
+      "date": "2026-01-23",
+      "format": "lidgen",
+      "hook_type": "financial",
+      "angle": "локация центр",
+      "cta": "НЕБО",
+      "lot_id": null,
+      "lot_name": null,
+      "topics": [
+        "локация",
+        "квартира",
+        "пентхаус",
+        "видовой"
+      ]
+    }
+  ],
+  "stats": {
+    "formats": {
+      "lidgen": 12,
+      "лидген": 4,
+      "кружок": 1,
+      "дайджест": 1,
+      "live": 1,
+      "digest": 2
+    },
+    "hooks": {
+      "financial": 14,
+      "unknown": 6,
+      "location": 1
+    },
+    "ctas": {
+      "ОФИС": 2,
+      "КРЕМЛЬ": 1,
+      "ТВЕРСКАЯ": 1,
+      "ПАНОРАМА": 1,
+      "ПЕНТХАУС": 1,
+      "НАБЕРЕЖНАЯ": 1,
+      "НЕБО": 1
+    },
+    "angles": {
+      "локация центр": 3,
+      "инвестиция": 6,
+      "unknown": 4,
+      "рассрочка 0%": 4,
+      "локация метро": 1,
+      "ипотека": 2,
+      "скидка": 1
+    }
+  }
+}

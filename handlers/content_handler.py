@@ -2204,6 +2204,14 @@ async def process_post_lot(message: types.Message, state: FSMContext):
                         else:
                             lot_data_parts.append(f"[Сайт {url} не удалось распарсить, используй данные пользователя]")
 
+            # 2b. НОВОЕ: Если отправлено название ЖК без ссылки — ищем по названию через Яндекс
+            elif user_text and not user_text.isdigit() and len(user_text) > 3:
+                # Проверяем что это похоже на название ЖК (содержит "жк" или длинное название)
+                if "жк" in user_text.lower() or len(user_text) > 10:
+                    search_result = await search_jk_info(user_text)
+                    if search_result:
+                        lot_data_parts.append(f"ИНФОРМАЦИЯ ИЗ ЯНДЕКСА:\n{search_result}")
+
             # 3. Номер лота из списка
             if user_text.isdigit():
                 lots = get_client_lots(client_slug, status="READY_FOR_CONTENT")

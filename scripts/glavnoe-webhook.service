@@ -1,0 +1,30 @@
+[Unit]
+Description=Glavnoe Bot - GitHub Webhook Listener
+Documentation=https://github.com/anthropics/claude-code
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/user/glavnoeauthorbot
+
+# Главный процесс
+ExecStart=/usr/bin/python3 /home/user/glavnoeauthorbot/scripts/webhook_listener.py
+
+# Перезапустить если упал
+Restart=always
+RestartSec=10
+
+# Логирование
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=glavnoe-webhook
+
+# Ограничения ресурсов
+LimitNOFILE=65536
+
+# Окружение
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target

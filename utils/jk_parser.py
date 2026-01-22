@@ -33,120 +33,177 @@ def find_url_in_text(text: str) -> Optional[str]:
 
 
 def extract_prices(text: str) -> List[str]:
-    """Извлечь цены из текста"""
+    """Извлечь цены из текста.
+
+    Более строгие критерии:
+    - Явные указания на цены (ключевые слова)
+    - Избегаем случайных чисел из контекста
+    - Нормализуем форматы
+    """
     prices = []
 
-    # Паттерны цен: "от 25 млн", "от 25 000 000", "25.5 млн ₽"
+    # СТРОГИЕ паттерны (должны быть явно указаны как цены)
     patterns = [
-        r'от\s*(\d+[\.,]?\d*)\s*млн',
-        r'(\d+[\.,]?\d*)\s*млн\s*(?:₽|руб|рублей)',
-        r'от\s*(\d{1,3}(?:\s?\d{3})+)\s*(?:₽|руб)',
-        r'цена[:\s]+(\d+[\.,]?\d*)\s*млн',
-        r'стоимость[:\s]+от?\s*(\d+[\.,]?\d*)\s*млн',
+        # Явные "цена", "стоимость", "от"
+        (r'(?:цена|стоимость|от)\s*(?:квартир|помещ)?\s*[:\s]*(?:от\s+)?(\d+[\.,]?\d*)\s*млн', True),
+        (r'от\s+(\d+[\.,]?\d*)\s+млн\s*(?:₽|руб)?', True),
+        # Число с явным "млн" рядом
+        (r'(\d+[\.,]?\d*)\s*млн\s*(?:₽|рублей|руб)\b', True),
+        # Диапазон цен: "25-30 млн"
+        (r'(\d+[\.,]?\d*)\s*-\s*(\d+[\.,]?\d*)\s*млн', True),
     ]
 
-    for pattern in patterns:
-        matches = re.findall(pattern, text.lower())
-        for match in matches:
-            clean = match.replace(' ', '').replace(',', '.')
-            prices.append(f"{clean} млн ₽")
+    for pattern, should_use in patterns:
+        if not should_use:
+            continue
 
-    return list(set(prices))[:3]  # Уникальные, макс 3
+        matches = re.finditer(pattern, text.lower())
+        for match in matches:
+            groups = match.groups()
+
+            if len(groups) == 1:
+                # Одно число
+                price = groups[0].replace(' ', '').replace(',', '.')
+                # Пропускаем очень маленькие или очень большие числа (шум)
+                try:
+                    price_float = float(price)
+                    if 0.5 <= price_float <= 500:  # Разумные диапазоны цен
+                        prices.append(f"{price} млн ₽")
+                except ValueError:
+                    pass
+            elif len(groups) == 2:
+                # Диапазон - берем оба края
+                price1 = groups[0].replace(' ', '').replace(',', '.')
+                price2 = groups[1].replace(' ', '').replace(',', '.')
+                try:
+                    p1 = float(price1)
+                    p2 = float(price2)
+                    if 0.5 <= p1 <= 500 and 0.5 <= p2 <= 500:
+                        prices.append(f"{price1}-{price2} млн ₽")
+                except ValueError:
+                    pass
+
+    # Убираем дубликаты и ограничиваем количество
+    return list(dict.fromkeys(prices))[:3]
 
 
 def extract_metro(text: str) -> List[Dict]:
-    """Извлечь информацию о метро"""
+    """Извлечь информацию о метро.
+
+    Более строгие критерии:
+    - Только четкие упоминания метро с расстоянием/временем
+    - Избегаем дубликатов и неправильно распознанных данных
+    """
     metro_info = []
 
-    # Паттерны: "10 мин до метро Тульская", "м. Спортивная — 5 минут"
+    # СТРОГИЕ паттерны (требуют время или явное "метро")
     patterns = [
-        r'(\d+)\s*мин(?:ут[ыа]?)?\s*(?:до|от)?\s*(?:метро|м\.)\s*[«"]?(\w+)[»"]?',
-        r'(?:метро|м\.)\s*[«"]?(\w+)[»"]?\s*[—–-]\s*(\d+)\s*мин',
-        r'(?:метро|м\.)\s*[«"]?(\w+)[»"]?',
+        # Наиболее надежные: "10 мин до метро Тульская", "м. Спортивная — 5 минут"
+        (r'(\d+)\s*мин(?:ут[ыа]?)?\s*(?:до|от|пешком)?\s*(?:метро|м\.)\s*([А-Яа-яЁё]+(?:\s+[А-Яа-яЁё]+)?)', True),
+        (r'(?:метро|м\.)\s*([А-Яа-яЁё]+(?:\s+[А-Яа-яЁё]+)?)\s*[—–-]\s*(\d+)\s*мин', True),
+        # Только метро без времени (если явно упоминается)
+        (r'м\.\s*([А-Яа-яЁё]+(?:\s+[А-Яа-яЁё]+)?)\b', False),
     ]
 
-    for pattern in patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
+    for pattern, requires_time in patterns:
+        matches = re.finditer(pattern, text, re.IGNORECASE)
         for match in matches:
-            if len(match) == 2:
-                if match[0].isdigit():
-                    metro_info.append({"station": match[1], "time": f"{match[0]} мин"})
-                else:
-                    metro_info.append({"station": match[0], "time": f"{match[1]} мин"})
-            elif len(match) == 1:
-                metro_info.append({"station": match[0], "time": None})
+            groups = match.groups()
 
-    # Убираем дубли по станции
-    seen = set()
+            if requires_time:
+                if len(groups) == 2:
+                    # Определяем что является временем
+                    if groups[0].isdigit():
+                        metro_info.append({
+                            "station": groups[1].strip(),
+                            "time": f"{groups[0]} мин"
+                        })
+                    else:
+                        # groups[1] - время, groups[0] - станция
+                        metro_info.append({
+                            "station": groups[0].strip(),
+                            "time": f"{groups[1]} мин"
+                        })
+            else:
+                # Только станция без времени
+                metro_info.append({
+                    "station": groups[0].strip(),
+                    "time": None
+                })
+
+    # Убираем дубли по станции (case-insensitive)
+    seen = {}
     unique = []
     for m in metro_info:
-        if m["station"].lower() not in seen:
-            seen.add(m["station"].lower())
+        station_key = m["station"].lower()
+
+        # Предпочитаем запись с временем если есть дублирование
+        if station_key not in seen:
+            seen[station_key] = m
             unique.append(m)
+        elif m.get("time") and not seen[station_key].get("time"):
+            # Заменяем на версию с временем
+            idx = unique.index(seen[station_key])
+            unique[idx] = m
+            seen[station_key] = m
 
     return unique[:3]
 
 
 def extract_features(text: str) -> List[str]:
-    """Извлечь особенности/фишки ЖК"""
+    """Извлечь особенности/фишки ЖК.
+
+    Более строгие критерии для избежания 'воды':
+    - Нужны конкретные, проверяемые преимущества
+    - Избегаем общих слов и предположений
+    - Максимум 5-6 фичей (только самые важные)
+    """
     features = []
 
-    # Ключевые слова фишек
+    # ТОЛЬКО конкретные фишки (без воды)
     feature_keywords = [
-        # Финансы
+        # Финансовые условия (только конкретные)
         (r'рассрочк[аеуи]\s*0\s*%', 'Рассрочка 0%'),
-        (r'рассрочк[аеуи]\s*без\s*%', 'Рассрочка без %'),
         (r'первый\s*взнос\s*от\s*(\d+[\.,]?\d*)\s*млн', 'ПВ от {0} млн'),
-        (r'первоначальный\s*взнос\s*от\s*(\d+[\.,]?\d*)', 'ПВ от {0} млн'),
         (r'ипотек[аеуи]\s*от\s*(\d+[\.,]?\d*)\s*%', 'Ипотека от {0}%'),
-        (r'траншев[аяой]+\s*ипотек', 'Траншевая ипотека'),
-        (r'субсидирован\w+\s*ипотек', 'Субсидированная ипотека'),
 
-        # Готовность
+        # Готовность (только факты)
         (r'ключи\s*(?:сразу|после\s*сделки)', 'Ключи сразу'),
         (r'сдан(?:ный|а|о)?\s*дом', 'Сданный дом'),
-        (r'готов[аоы]+\s*(?:к\s*)?(?:заселению|проживанию)', 'Готов к заселению'),
-        (r'с\s*(?:готовой\s*)?отделк', 'С отделкой'),
-        (r'с\s*ремонт', 'С ремонтом'),
-        (r'без\s*отделк', 'Без отделки'),
-        (r'white\s*box', 'White box'),
 
-        # Особенности
-        (r'терраc[аеуы]', 'Терраса'),
-        (r'панорамн\w+\s*(?:вид|остеклен|окн)', 'Панорамные окна'),
-        (r'вид\s*на\s*(?:парк|воду|реку|город|москву)', 'Видовая квартира'),
-        (r'двухуровнев', 'Двухуровневая'),
+        # Особенности квартир (только проверяемые)
+        (r'панорамн\w+\s*(?:вид|окн)', 'Панорамные окна'),
         (r'пентхаус', 'Пентхаус'),
-        (r'высок\w+\s*потолк', 'Высокие потолки'),
-        (r'собствен\w+\s*(?:парк|двор|территор)', 'Своя территория'),
-        (r'закрыт\w+\s*(?:двор|территор)', 'Закрытая территория'),
+        (r'террас[аеуы]', 'Терраса'),
         (r'подземн\w+\s*парк', 'Подземный паркинг'),
-        (r'консьерж', 'Консьерж-сервис'),
 
-        # Класс
-        (r'бизнес[\s-]*класс', 'Бизнес-класс'),
+        # Сегмент (с осторожностью)
         (r'премиум[\s-]*класс', 'Премиум-класс'),
-        (r'элит[\s-]*класс', 'Элит-класс'),
-        (r'комфорт[\s-]*класс', 'Комфорт-класс'),
-
-        # Инфраструктура
-        (r'детск\w+\s*сад', 'Детский сад'),
-        (r'школ[аеуы]', 'Школа рядом'),
-        (r'фитнес', 'Фитнес'),
-        (r'spa|спа', 'SPA'),
+        (r'бизнес[\s-]*класс', 'Бизнес-класс'),
     ]
 
     text_lower = text.lower()
 
     for pattern, label in feature_keywords:
+        # Проверяем что совпадение находится в контексте (не в случайном месте)
         match = re.search(pattern, text_lower)
         if match:
+            # Проверяем что это не просто упоминание в сноске или комментарии
+            match_start = match.start()
+            # Ищем контекстные слова перед совпадением
+            context_before = text_lower[max(0, match_start - 50):match_start]
+
+            # Исключаем если это звучит как отрицание или сравнение
+            if re.search(r'(без|не|но|только|если|как|например)', context_before):
+                continue
+
             if '{0}' in label and match.groups():
                 features.append(label.format(match.group(1)))
             else:
                 features.append(label)
 
-    return list(dict.fromkeys(features))[:10]  # Уникальные, макс 10
+    # Возвращаем только самые релевантные (макс 6, не 10)
+    return list(dict.fromkeys(features))[:6]
 
 
 def extract_location(text: str) -> Dict:
@@ -303,9 +360,14 @@ def format_parsed_data(data: dict, include_name: bool = False) -> str:
     """
     Форматировать распаршенные данные для промпта Claude.
 
+    Чистый и конкретный формат без 'воды'.
+
     Args:
         data: распаршенные данные
         include_name: включать ли название ЖК (по умолчанию НЕТ — для постов)
+
+    Returns:
+        Отформатированная строка с только релевантной информацией
     """
     if not data["parse_success"]:
         return f"Ошибка парсинга: {data['error']}"
@@ -316,31 +378,36 @@ def format_parsed_data(data: dict, include_name: bool = False) -> str:
     if include_name and data["name"]:
         lines.append(f"НАЗВАНИЕ: {data['name']}")
 
-    if data["prices"]:
+    # Добавляем только НЕ пустые секции
+    if data.get("prices"):
         lines.append(f"ЦЕНЫ: {', '.join(data['prices'])}")
 
-    if data["metro"]:
+    if data.get("metro"):
         metro_str = []
         for m in data["metro"]:
-            if m["time"]:
+            if m.get("time"):
                 metro_str.append(f"{m['station']} ({m['time']})")
             else:
                 metro_str.append(m['station'])
-        lines.append(f"МЕТРО: {', '.join(metro_str)}")
+        if metro_str:
+            lines.append(f"МЕТРО: {', '.join(metro_str)}")
 
-    if data["location"].get("district"):
+    if data.get("location", {}).get("district"):
         lines.append(f"РАЙОН: {data['location']['district']}")
 
-    if data["deadline"]:
+    if data.get("deadline"):
         lines.append(f"СРОК СДАЧИ: {data['deadline']}")
 
-    if data["features"]:
-        lines.append(f"ОСОБЕННОСТИ: {', '.join(data['features'])}")
+    if data.get("features"):
+        # Фильтруем пустые фичи
+        features = [f for f in data["features"] if f and f.strip()]
+        if features:
+            lines.append(f"ОСОБЕННОСТИ: {', '.join(features)}")
 
-    # Сырой текст НЕ добавляем — там может быть название ЖК
-    # Все полезные данные уже извлечены парсером выше
+    # НИКОГДА не добавляем raw_text — это 'вода'
+    # Все полезные данные уже структурированы выше
 
-    return "\n".join(lines)
+    return "\n".join(lines) if lines else "Данные не найдены"
 
 
 async def search_jk_info(query: str) -> Optional[str]:

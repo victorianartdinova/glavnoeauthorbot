@@ -358,7 +358,7 @@ async def search_jk_info(query: str) -> Optional[str]:
     import logging
     logger = logging.getLogger(__name__)
 
-    # Первый приоритет: Yandex XML API
+    # Первый приоритет: Yandex XML API через search_object_with_utp
     try:
         from utils.yandex_search import search_object_with_utp
         from utils.search_cache import get_cached_search, save_to_cache
@@ -370,18 +370,23 @@ async def search_jk_info(query: str) -> Optional[str]:
             logger.debug(f"Using cached search result for: {query}")
             return cached_result
 
-        # Делаем поиск через API
-        result = await search_object_with_utp(query, max_queries=4)
+        # Делаем поиск с расширенной стратегией (6 запросов)
+        result = await search_object_with_utp(query, max_queries=6)
         if result:
             # Сохраняем в кеш
             await save_to_cache(cache_key, result)
+            logger.info(f"Found data via search_object_with_utp for: {query}")
             return result
 
     except Exception as e:
         logger.debug(f"Yandex API search failed: {e}, falling back to web scraping")
 
-    # Fallback: старый web scraping (если API недоступен)
-    search_url = f"https://yandex.ru/search/?text={quote_plus(query + ' ЖК Москва цена метро')}"
+    # Fallback: улучшенный web scraping с несколькими вариантами поиска
+    search_variants = [
+        f"{query} ЖК Москва цена метро",
+        f"{query} жилой комплекс параметры",
+        f"{query} Москва расположение район",
+    ]
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -389,28 +394,40 @@ async def search_jk_info(query: str) -> Optional[str]:
         "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
     }
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                if response.status != 200:
-                    return None
-                html = await response.text()
+    all_snippets = []
 
-        soup = BeautifulSoup(html, "lxml")
-        results = []
+    for search_query in search_variants:
+        try:
+            search_url = f"https://yandex.ru/search/?text={quote_plus(search_query)}"
+            logger.debug(f"Trying fallback web scraping: {search_query}")
 
-        # Парсим сниппеты Яндекса
-        for snippet in soup.select(".OrganicTextContentSpan, .ExtendedText-Content, .Organic-ContentWrapper"):
-            text = snippet.get_text(strip=True)
-            if text and len(text) > 30:
-                results.append(text[:300])
-                if len(results) >= 2:
-                    break
+            async with aiohttp.ClientSession() as session:
+                async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status != 200:
+                        continue
+                    html = await response.text()
 
-        if results:
-            return "ИНФОРМАЦИЯ ИЗ ПОИСКА:\n" + "\n".join(results)
-        return None
+            soup = BeautifulSoup(html, "lxml")
 
-    except Exception as e:
-        logger.debug(f"Web scraping fallback failed: {e}")
-        return None
+            # Парсим сниппеты Яндекса (пробуем разные селекторы)
+            for snippet_elem in soup.select(".OrganicTextContentSpan, .ExtendedText-Content, .Organic-ContentWrapper, div[class*='Snippet'], div[class*='snippet']"):
+                text = snippet_elem.get_text(strip=True)
+                if text and len(text) > 30:
+                    all_snippets.append(text[:400])
+                    if len(all_snippets) >= 3:
+                        break
+
+            if len(all_snippets) >= 3:
+                break
+
+        except Exception as e:
+            logger.debug(f"Fallback scraping for '{search_query}' failed: {e}")
+            continue
+
+    if all_snippets:
+        result = "ИНФОРМАЦИЯ ИЗ ПОИСКА ЯНДЕКС:\n" + "\n".join(all_snippets)
+        logger.info(f"Found data via fallback web scraping for: {query}")
+        return result
+
+    logger.warning(f"No search results found for: {query}")
+    return None

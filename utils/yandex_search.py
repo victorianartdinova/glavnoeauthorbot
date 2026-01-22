@@ -577,10 +577,10 @@ def format_utp_results(utp_data: Dict) -> str:
     return "\n".join(lines) if lines else None
 
 
-async def search_object_with_utp(object_name: str, max_queries: int = 4) -> Optional[str]:
+async def search_object_with_utp(object_name: str, max_queries: int = 6) -> Optional[str]:
     """
     Полный поиск информации об объекте для УТП.
-    Делает несколько запросов для максимума информации.
+    Делает несколько запросов для максимума информации с разными стратегиями.
 
     Приоритет: SerpAPI → Playwright → web scraping
 
@@ -594,12 +594,15 @@ async def search_object_with_utp(object_name: str, max_queries: int = 4) -> Opti
     if not object_name or len(object_name.strip()) < 3:
         return None
 
-    # Стратегия множественных запросов
+    # Расширенная стратегия множественных запросов
+    # Ищем по названию, по названию с ключевыми словами, и с локацией
     queries = [
         f"{object_name}",
-        f"{object_name} офис недвижимость",
-        f"{object_name} Москва",
-        f"{object_name} информация особенности",
+        f"{object_name} цена Москва",
+        f"{object_name} метро расположение",
+        f"{object_name} жилой комплекс ЖК",
+        f"{object_name} недвижимость особенности",
+        f"{object_name} расстояние метро район",
     ][:max_queries]
 
     all_results = []
@@ -625,11 +628,13 @@ async def search_object_with_utp(object_name: str, max_queries: int = 4) -> Opti
 
         if results:
             all_results.extend(results)
-            logger.debug(f"  Found {len(results)} results")
+            logger.debug(f"  Found {len(results)} results for query: {q}")
 
     if not all_results:
         logger.warning(f"No search results for: {object_name}")
         return None
+
+    logger.info(f"Total results found: {len(all_results)}")
 
     # Извлекаем и форматируем данные для УТП
     utp_data = await extract_info_for_utp(all_results)
@@ -639,4 +644,5 @@ async def search_object_with_utp(object_name: str, max_queries: int = 4) -> Opti
         logger.info(f"Successfully extracted UTP data for: {object_name}")
         return formatted
 
+    logger.warning(f"No UTP data extracted for: {object_name}")
     return None

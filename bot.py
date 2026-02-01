@@ -18,6 +18,7 @@ from config import (
     CLIENT_THREADS,
     OPERATOR_USERNAME,
     ADMIN_USER_ID,
+    ALLOWED_USERS,
     ENABLE_LOT_CARD,
     ENABLE_PACKAGE_BY_LOT,
     ENABLE_BRIEF_SHORT,
@@ -81,6 +82,17 @@ logger = logging.getLogger(__name__)
 bot: Bot = None
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+
+
+# === Whitelist middleware ===
+@dp.message.outer_middleware()
+async def whitelist_middleware(handler, event: types.Message, data):
+    """Проверка доступа — только разрешённые пользователи"""
+    if ALLOWED_USERS and event.from_user:
+        if event.from_user.id not in ALLOWED_USERS:
+            # Игнорируем сообщения от неизвестных пользователей
+            return
+    return await handler(event, data)
 
 
 # === Команды ===

@@ -17,6 +17,7 @@ __all__ = [
     'CLIENT_THREADS',
     'OPERATOR_USERNAME',
     'ADMIN_USER_ID',
+    'ALLOWED_USERS',
 
     # Claude API
     'CLAUDE_API_KEY',

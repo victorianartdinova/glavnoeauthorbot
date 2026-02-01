@@ -104,6 +104,10 @@ OPERATOR_USERNAME = os.getenv("OPERATOR_USERNAME", "ksandrbloger")
 # Админ (для /dev команды)
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0")) or None
 
+# Whitelist пользователей (только они могут использовать бота)
+_allowed_str = os.getenv("ALLOWED_USERS", "")
+ALLOWED_USERS = set(int(x) for x in _allowed_str.split(",") if x.strip())
+
 
 # === Claude API ===
 CLAUDE_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")

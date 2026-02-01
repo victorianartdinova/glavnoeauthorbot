@@ -162,10 +162,12 @@ async def check_client_selected(message: types.Message, state: FSMContext) -> st
     data = await state.get_data()
     client = data.get("current_client")
     if not client:
-        await message.answer(
-            "⚠️ Сначала выбери клиента",
-            reply_markup=get_clients_keyboard()
-        )
+        # В групповых чатах не спамим — только в личке
+        if message.chat.type == "private":
+            await message.answer(
+                "⚠️ Сначала выбери клиента",
+                reply_markup=get_clients_keyboard()
+            )
         return None
     return client
 
